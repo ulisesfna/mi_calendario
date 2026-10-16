@@ -16,7 +16,7 @@ No hace falta instalar Git: todo se hace desde la web de GitHub.
 3. Abre esta carpeta en el Explorador, selecciona **todo su contenido** (menos la carpeta `.claude`
    y `Abrir calendario.bat`, que solo sirven en el PC) y **arrástralo** a la página. Pulsa **Commit changes**.
    - Las carpetas `css`, `js`, `icons` deben quedar dentro (GitHub las sube al arrastrarlas).
-   - El archivo `.nojekyll` está oculto: si no aparece, en el Explorador activa *Vista → Elementos ocultos*.
+   - El archivo `.nojekyll` es opcional: la web de GitHub no deja subir archivos que empiezan por punto, y no pasa nada.
 4. **Settings → Pages** → *Source*: **Deploy from a branch** → Branch **main** / **(root)** → **Save**.
 5. Al minuto estará en **`https://TU-USUARIO.github.io/calendario/`**.
 

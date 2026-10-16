@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
@@ -6,10 +6,11 @@
   <title>Calendario</title>
   <meta name="description" content="Calendario de eventos, tareas y planning con categorías y avisos personalizables">
   <meta name="theme-color" content="#5b4bdb">
+  <meta name="mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/app.css?v=4">
+  <link rel="stylesheet" href="css/app.css?v=5">
 </head>
 <body>
   <div id="app">
@@ -25,7 +26,6 @@
       <div id="cats" class="cats"></div>
       <div class="side-tools">
         <button class="btn block" id="importBtn">🎓 Importar horario (Chronos / .ics)</button>
-        <button class="btn block" id="installBtn" hidden>📲 Instalar como aplicación</button>
         <button class="btn block sync-btn" id="syncBtn">☁️ Sincronización</button>
       </div>
       <div class="side-foot">
@@ -63,6 +63,6 @@
   <div id="popover" hidden></div>
   <div id="alarm" hidden></div>
   <div id="toasts" aria-live="polite"></div>
-  <script type="module" src="js/app.js?v=4"></script>
+  <script type="module" src="js/app.js?v=5"></script>
 </body>
 </html>

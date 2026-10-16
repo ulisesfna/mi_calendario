@@ -713,26 +713,10 @@ setTimeout(() => {
 
 // ---------------- Instalar como aplicación ----------------
 
-let installEvent = null;
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  installEvent = e;
-  ctx.canInstall = true;
-  $('#installBtn').hidden = false;
-});
-ctx.promptInstall = async () => {
-  if (!installEvent) return toast('Usa el menú del navegador → «Instalar aplicación»');
-  installEvent.prompt();
-  await installEvent.userChoice;
-  installEvent = null;
-  ctx.canInstall = false;
-  $('#installBtn').hidden = true;
-};
-$('#installBtn').onclick = ctx.promptInstall;
-window.addEventListener('appinstalled', () => {
-  $('#installBtn').hidden = true;
-  toast('¡Aplicación instalada!');
-});
+// No se intercepta «beforeinstallprompt»: Chrome gestiona la instalación con su propio menú
+// (en Android, interceptarlo podía dejar la instalación a medias).
+ctx.promptInstall = () => toast('Menú del navegador ⋮ → «Instalar aplicación» o «Añadir a pantalla de inicio»');
+window.addEventListener('appinstalled', () => toast('¡Aplicación instalada!'));
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
