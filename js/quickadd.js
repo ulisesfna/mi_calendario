@@ -30,7 +30,8 @@ export function parseQuick(input, now = new Date()) {
     const level = LEVEL_WORDS[norm(w)] ?? 'sound';
     const unit = !u || u.startsWith('m') ? 'min' : u;
     // Sin antelación: las alarmas suenan a la hora y el resto avisa 10 min antes
-    const def = level === 'alarm' || level === 'persistent' ? 0 : 10;
+    // (las tareas avisan siempre a la hora, salvo que se indique otra antelación)
+    const def = level === 'alarm' || level === 'persistent' || res.type === 'task' ? 0 : 10;
     res.reminder = { value: n ? +n : def, unit, level };
   });
   take(/\s~(?=\s)/, () => (res.inAgenda = false));
@@ -110,6 +111,8 @@ export function quickToItem(p, { defaultDuration = 60 } = {}) {
     if (duration <= 0) duration += 1440;
   }
   const out = { type: p.type, title: p.title, start: toLocalISO(start), duration, allDay, inAgenda: p.inAgenda };
+  // Tareas sin duración indicada: sin fin (en curso hasta completarlas)
+  if (p.type === 'task' && !p.duration && !p.endTime) out.openEnd = true;
   if (p.recurrence) {
     const r = defaultRule(p.recurrence.freq, out.start);
     r.interval = p.recurrence.interval ?? 1;

@@ -9,32 +9,43 @@ import { addDays, diffDays, esc, fmtTime, parseLocal, rgba, textOn } from '../ut
  * mode: 'full' (hora + título) | 'short' (solo título) | 'color' (solo la barra de color).
  * Lo que está fuera de la agenda se muestra siempre solo con color, atenuado.
  */
+/** Marca de las tareas: ⚠ vencida y sin hacer, ∞ sin fin (en curso) */
+function taskMark(inst) {
+  if (inst.rolled) return inst.pending === 'overdue' ? '⚠ ' : '∞ ';
+  return inst.openEnd ? '∞ ' : '';
+}
+const rolledTip = (inst) =>
+  inst.rolled ? ` — ${inst.pending === 'overdue' ? 'sin completar, venció el' : 'en curso desde el'} ${inst.start.getDate()}/${inst.start.getMonth() + 1}` : '';
+
 export function blockHTML(inst) {
   const soft = store.get().settings.eventStyle === 'soft';
-  const mode = inst.inAgenda ? store.monthTextMode(inst.item) : 'color';
+  let mode = inst.inAgenda ? store.monthTextMode(inst.item) : 'color';
+  if (inst.rolled && mode === 'color') mode = 'short'; // las pendientes siempre se leen
   const bg = soft ? rgba(inst.color, 0.25) : inst.color;
   const fg = soft ? 'inherit' : textOn(inst.color);
   const checkable = inst.item.type === 'task' || inst.kind === 'step';
-  const cls = ['chip', 'block', `m-${mode}`, inst.done ? 'done' : '', inst.inAgenda ? '' : 'ghost', inst.kind, inst.item.type, ctx.selected === inst.id ? 'sel' : ''].join(' ');
-  const tip = `${inst.allDay ? '' : fmtTime(inst.start) + ' '}${inst.title}${inst.inAgenda ? '' : ' (fuera de la agenda)'}`;
+  const cls = ['chip', 'block', `m-${mode}`, inst.done ? 'done' : '', inst.inAgenda ? '' : 'ghost', inst.kind, inst.item.type, inst.rolled ? 'rolled' : '', ctx.selected === inst.id ? 'sel' : ''].join(' ');
+  const tip = `${inst.allDay ? '' : fmtTime(inst.start) + ' '}${inst.title}${inst.inAgenda ? '' : ' (fuera de la agenda)'}${rolledTip(inst)}`;
   if (mode === 'color') return `<div class="${cls}" data-inst="${inst.id}" draggable="true" style="--c:${inst.color};--bg:${bg}" title="${esc(tip)}"></div>`;
   return `<div class="${cls}" data-inst="${inst.id}" draggable="true" style="--c:${inst.color};--bg:${bg};--fg:${fg}" title="${esc(tip)}">
     ${checkable ? `<span class="chip-check" data-check="${inst.id}">${inst.done ? '✔' : ''}</span>` : ''}
-    ${mode === 'full' && !inst.allDay ? `<span class="chip-time">${fmtTime(inst.start)}</span>` : ''}<span class="chip-t">${esc(inst.title)}</span>
+    ${mode === 'full' && !inst.allDay && !inst.rolled ? `<span class="chip-time">${fmtTime(inst.start)}</span>` : ''}<span class="chip-t">${taskMark(inst)}${esc(inst.title)}</span>
   </div>`;
 }
 
 export function chipHTML(inst, { time = false } = {}) {
-  const solid = inst.allDay || inst.kind !== 'item';
+  const solid = inst.allDay || inst.long || inst.kind !== 'item';
   const soft = store.get().settings.eventStyle === 'soft';
   const bg = solid ? (soft ? rgba(inst.color, 0.22) : inst.color) : 'transparent';
   const fg = solid && !soft ? textOn(inst.color) : 'inherit';
   const checkable = inst.item.type === 'task' || inst.kind === 'step';
-  const cls = ['chip', solid ? 'solid' : 'timed', inst.done ? 'done' : '', inst.kind, ctx.selected === inst.id ? 'sel' : ''].join(' ');
-  return `<div class="${cls}" data-inst="${inst.id}" draggable="true" style="--c:${inst.color};--bg:${bg};--fg:${fg}" title="${esc(inst.title)}">
+  const cls = ['chip', solid ? 'solid' : 'timed', inst.done ? 'done' : '', inst.kind, inst.rolled ? 'rolled' : '', ctx.selected === inst.id ? 'sel' : ''].join(' ');
+  const last = inst.long ? addDays(inst.end, inst.end.getHours() || inst.end.getMinutes() ? 0 : -1) : null;
+  const until = last ? ` (hasta el ${last.getDate()}/${last.getMonth() + 1})` : '';
+  return `<div class="${cls}" data-inst="${inst.id}" draggable="true" style="--c:${inst.color};--bg:${bg};--fg:${fg}" title="${esc(inst.title + until + rolledTip(inst))}">
     ${checkable ? `<span class="chip-check" data-check="${inst.id}">${inst.done ? '✔' : ''}</span>` : solid ? '' : '<span class="dot"></span>'}
     ${time && !inst.allDay ? `<span class="chip-time">${fmtTime(inst.start)}</span>` : ''}
-    ${inst.icon ? `<span class="chip-i">${inst.icon}</span>` : ''}<span class="chip-t">${esc(inst.title)}</span>
+    ${inst.icon ? `<span class="chip-i">${inst.icon}</span>` : ''}<span class="chip-t">${taskMark(inst)}${esc(inst.title)}</span>
   </div>`;
 }
 

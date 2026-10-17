@@ -18,6 +18,10 @@ export const DEFAULT_SETTINGS = {
   monthText: 'full', // full | short | color — texto de los bloques en la vista mensual
   defaultDuration: 60,
   defaultReminders: [{ id: 'd1', value: 10, unit: 'min', level: 'vibrate' }],
+  // Avisos de las tareas: por defecto, a la hora en que empiezan
+  taskReminders: [{ id: 't1', value: 0, unit: 'min', level: 'sound' }],
+  // Las tareas sin completar de días anteriores se muestran también hoy
+  rollOver: true,
   // Avisos automáticos de los exámenes (elementos marcados como examen)
   examReminders: [
     { id: 'e1', value: 2, unit: 'w', level: 'sound' },
@@ -281,6 +285,7 @@ export function inAgenda(item) {
 export function effectiveReminders(item) {
   if (Array.isArray(item.reminders)) return item.reminders;
   if (item.exam) return state.settings.examReminders ?? [];
+  if (item.type === 'task') return state.settings.taskReminders ?? [];
   for (const c of categoryChain(item.categoryId)) {
     if (Array.isArray(c.reminders)) return c.reminders;
   }

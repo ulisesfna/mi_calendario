@@ -4,7 +4,7 @@ import * as engine from '../engine.js';
 import { describeRule } from '../recurrence.js';
 import { describeReminder } from '../notify.js';
 import { ctx, chooseScope, toast } from './dom.js';
-import { addDays, addMinutes, esc, fmtDateLong, fmtDuration, fmtTime, uid } from '../util.js';
+import { addDays, addMinutes, esc, fmtDateLong, fmtDuration, fmtTime, startOfDay, uid } from '../util.js';
 
 let current = null; // id de la aparición
 let pos = null;
@@ -65,9 +65,16 @@ export function renderPopover() {
   const reminders = isItem ? store.effectiveReminders(it) : [];
   const chain = store.categoryChain(it.categoryId).map((c) => c.id);
   const linkedPlans = it.type !== 'plan' && chain.length ? store.get().items.filter((x) => x.type === 'plan' && chain.includes(x.categoryId)) : [];
-  const when = inst.allDay
-    ? `${fmtDateLong(inst.start)}${inst.end - inst.start > 86400000 ? ` → ${fmtDateLong(addDays(inst.end, -1))}` : ''}`
-    : `${fmtDateLong(inst.start)}<br>${fmtTime(inst.start)} – ${fmtTime(inst.end)} <span class="muted">(${fmtDuration((inst.end - inst.start) / 60000)})</span>`;
+  let when;
+  if (inst.openEnd) when = `${fmtDateLong(inst.start)}<br>${inst.allDay ? '' : `desde las ${fmtTime(inst.start)} · `}<span class="muted">∞ sin fin, hasta que la completes</span>`;
+  else if (inst.long) when = `${fmtDateLong(inst.start)} · ${fmtTime(inst.start)}<br>→ ${fmtDateLong(inst.end)} · ${fmtTime(inst.end)}`;
+  else if (inst.allDay) when = `${fmtDateLong(inst.start)}${inst.end - inst.start > 86400000 ? ` → ${fmtDateLong(addDays(inst.end, -1))}` : ''}`;
+  else when = `${fmtDateLong(inst.start)}<br>${fmtTime(inst.start)} – ${fmtTime(inst.end)} <span class="muted">(${fmtDuration((inst.end - inst.start) / 60000)})</span>`;
+  // Tarea sin completar cuyo momento ya pasó
+  const now = new Date();
+  const pending = it.type === 'task' && inst.kind === 'item' && !inst.done
+    ? (!inst.openEnd && inst.end <= now ? 'overdue' : inst.openEnd && inst.start < startOfDay(now) ? 'running' : null)
+    : null;
   const typeLabel = { event: 'Evento', task: 'Tarea', plan: 'Planning' }[it.type];
 
   p.innerHTML = `<div class="pop" style="--c:${inst.color}">
@@ -87,6 +94,8 @@ export function renderPopover() {
       ${it.notes ? `<div class="pop-line">📝 <div class="pre">${esc(it.notes)}</div></div>` : ''}
       ${it.type === 'plan' && it.steps?.length ? `<div class="pop-line">📋 <div>${it.steps.filter((s) => s.done).length}/${it.steps.length} pasos completados</div></div>` : ''}
 
+      ${pending ? `<div class="pend-box">${pending === 'overdue' ? '⚠ Se pasó el plazo y no está hecha' : '∞ Sigue en curso desde hace días'}
+        <div class="row"><button class="btn small" data-a="to-today">→ Pasar a hoy</button><button class="btn small" data-a="to-tomorrow">→ Pasar a mañana</button></div></div>` : ''}
       ${checkable ? `<button class="btn block ${inst.done ? '' : 'primary'}" data-a="done">${inst.done ? '↩︎ Marcar como pendiente' : '✔ Marcar como hecha'}</button>` : ''}
 
       <div class="pop-section">
@@ -168,6 +177,10 @@ async function onClick(e) {
       return deleteInstance(inst);
     case 'done':
       return ctx.toggleDone(inst.id);
+    case 'to-today':
+      return ctx.moveTaskToDay(inst.id, 0);
+    case 'to-tomorrow':
+      return ctx.moveTaskToDay(inst.id, 1);
     case 'cat':
       closePopover();
       return ctx.openCategory(item.categoryId);

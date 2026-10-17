@@ -1,6 +1,6 @@
 // Service worker: funciona sin conexión y gestiona los botones de las notificaciones.
 // Al publicar una versión nueva, sube el número de VERSION para renovar la caché.
-const VERSION = 'cal-v7';
+const VERSION = 'cal-v8';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/app.js', 'js/util.js', 'js/store.js', 'js/palette.js', 'js/recurrence.js', 'js/engine.js', 'js/notify.js', 'js/ics.js', 'js/quickadd.js',

@@ -68,13 +68,32 @@ ctx.toggleDone = (id) => {
   const inst = engine.findInstance(id);
   if (!inst) return;
   store.mutate(inst.done ? 'Marcar pendiente' : 'Completar', () => engine.applyDone(inst, !inst.done));
-  if (!inst.done) {
+  if (!inst.done && navigator.userActivation?.hasBeenActive !== false) {
     try {
       navigator.vibrate?.(20);
     } catch { /* */ }
   }
 };
 ctx.quickShift = (id, min) => shiftCurrent(min, 0, id);
+/** Pasa una tarea pendiente a hoy (offset 0) o mañana (1), manteniendo su hora */
+ctx.moveTaskToDay = (id, offset) => {
+  const inst = engine.findInstance(id);
+  if (!inst) return;
+  const day = addDays(startOfDay(new Date()), offset);
+  let newId = null;
+  store.mutate(offset ? 'Pasar a mañana' : 'Pasar a hoy', () => {
+    newId = engine.moveToDay(inst, day);
+    // Si hoy esa hora ya ha pasado, que empiece ahora (en la próxima media hora)
+    const moved = engine.findInstance(newId);
+    if (!offset && moved && !moved.allDay && moved.start < new Date()) {
+      const d = new Date();
+      d.setMinutes(Math.ceil((d.getMinutes() + 1) / 30) * 30, 0, 0);
+      newId = engine.applyMove(moved, d, null, 'one');
+    }
+  });
+  if (popoverOpen() && popoverId() === id) closePopover();
+  toast(offset ? 'Pasada a mañana' : 'Pasada a hoy', { action: ctx.undo, timeout: 3500 });
+};
 ctx.commitMove = async (inst, newStart, newDuration) => {
   let scope = 'one';
   if (inst.recurring) {
@@ -184,6 +203,7 @@ function filtersHTML() {
     </div>
     <label class="check small"><input type="checkbox" data-fopt="showOutOfAgenda" ${s.showOutOfAgenda ? 'checked' : ''}> Ver en el calendario lo que está fuera de la agenda (en Mes, como línea fina)</label>
     <label class="check small"><input type="checkbox" data-fopt="showDone" ${s.showDone !== false ? 'checked' : ''}> Ver tareas completadas</label>
+    <label class="check small"><input type="checkbox" data-fopt="rollOver" ${s.rollOver !== false ? 'checked' : ''}> Mostrar hoy las tareas pendientes de días anteriores</label>
     <div class="row center wrap small mtext-row">Texto en la vista mes
       <div class="seg small">${[['full', 'Hora y título'], ['short', 'Título'], ['color', 'Solo color']].map(([v, l]) => `<button class="${(s.monthText ?? 'full') === v ? 'on' : ''}" data-mtext="${v}">${l}</button>`).join('')}</div>
     </div>`;

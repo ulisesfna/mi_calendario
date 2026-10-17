@@ -1,6 +1,6 @@
 // Vista mensual: bloques compactos de color (con texto completo, corto o solo color).
 import * as store from '../store.js';
-import { instancesInRange } from '../engine.js';
+import { instancesInRange, rolledOverTasks } from '../engine.js';
 import { ctx } from '../ui/dom.js';
 import { blockHTML, enableChipDnD } from './shared.js';
 import { addDays, dateKey, DAY_SHORT, sameDay, startOfMonth, startOfWeek } from '../util.js';
@@ -26,12 +26,18 @@ export function renderMonth(el) {
   }
   const today = new Date();
   const mobile = matchMedia('(max-width: 720px)').matches;
+  // Tareas pendientes de días anteriores: se muestran también en el día de hoy
+  const tk = dateKey(today);
+  if (today >= gridStart && today < end) {
+    const rolled = rolledOverTasks(today);
+    if (rolled.length) byDay.set(tk, [...(byDay.get(tk) ?? []), ...rolled]);
+  }
   let html = `<div class="month"><div class="month-head">${Array.from({ length: 7 }, (_, i) => `<div>${DAY_SHORT[(ws + i) % 7]}</div>`).join('')}</div><div class="month-grid">`;
   for (let i = 0; i < weeks * 7; i++) {
     const d = addDays(gridStart, i);
     const k = dateKey(d);
     // Primero lo de todo el día, luego por hora; lo que está fuera de la agenda al final
-    const list = (byDay.get(k) ?? []).sort((a, b) => b.inAgenda - a.inAgenda || b.allDay - a.allDay || a.start - b.start);
+    const list = (byDay.get(k) ?? []).sort((a, b) => !!b.rolled - !!a.rolled || b.inAgenda - a.inAgenda || b.allDay - a.allDay || a.start - b.start);
     html += `<div class="mcell ${d.getMonth() !== first.getMonth() ? 'other' : ''} ${sameDay(d, today) ? 'today' : ''}" data-day="${k}">
       <button class="mnum" data-goto="${k}">${d.getDate()}</button>
       <div class="mchips">${list.map(blockHTML).join('')}</div>

@@ -1,6 +1,6 @@
 // Vista de horas (día / 3 días / semana) con arrastrar para mover, estirar y crear.
 import * as store from '../store.js';
-import { findInstance, instancesInRange } from '../engine.js';
+import { findInstance, instancesInRange, rolledOverTasks } from '../engine.js';
 import { ctx } from '../ui/dom.js';
 import { chipHTML, enableChipDnD } from './shared.js';
 import {
@@ -77,8 +77,8 @@ function eventHTML(inst, seg, hh, dayStartMin) {
   const it = inst.item;
   // En las vistas de horas lo que está fuera de la agenda se ve igual que el resto
   const cls = ['ev', it.type, inst.done ? 'done' : '', ctx.selected === inst.id ? 'sel' : '', height < 34 ? 'short' : '',
-    seg.over ? 'plan-over' : '', seg.under ? 'under-plan' : '', seg.clash ? 'clash' : ''].join(' ');
-  const time = `${fmtTime(inst.start)}–${fmtTime(inst.end)}`;
+    seg.over ? 'plan-over' : '', seg.under ? 'under-plan' : '', seg.clash ? 'clash' : '', inst.openEnd ? 'open-end' : ''].join(' ');
+  const time = inst.openEnd ? `desde ${fmtTime(inst.start)} · ∞` : `${fmtTime(inst.start)}–${fmtTime(inst.end)}`;
   const check = it.type === 'task' ? `<span class="ev-check" data-check="${inst.id}">${inst.done ? '✔' : ''}</span>` : '';
   return `<div class="${cls}" data-inst="${inst.id}" style="top:${top}px;height:${height}px;left:calc(${left}% + 1px);width:calc(${width}% - 3px);${eventStyleVars(inst.color)}"${seg.clash ? ' title="Este planning se solapa con otro planning"' : ''}>
     <div class="ev-t">${seg.clash ? '<span class="clash-i">⚠</span>' : ''}${check}${inst.icon ? `<span class="ev-i">${inst.icon}</span>` : ''}${esc(inst.title)}${inst.recurring ? ' <span class="ev-r">↻</span>' : ''}</div>
@@ -99,8 +99,11 @@ export function renderTimeGrid(el, { start, days }) {
 
   const allDay = dates.map(() => []);
   const timed = dates.map(() => []);
+  // Tareas pendientes de días anteriores: aparecen también hoy, al principio de «todo el día»
+  const todayIdx = dates.findIndex((d) => sameDay(d, today));
+  if (todayIdx >= 0) allDay[todayIdx].push(...rolledOverTasks(today));
   for (const inst of insts) {
-    if (inst.allDay) {
+    if (inst.allDay || inst.long) {
       dates.forEach((d, i) => {
         if (inst.start < addDays(d, 1) && inst.end > d) allDay[i].push(inst);
       });

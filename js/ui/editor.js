@@ -9,7 +9,7 @@ import { deleteInstance } from './popover.js';
 import { colorButton, wireColorButtons } from './colorpicker.js';
 import { categoryButtonHTML, openCategoryPicker } from './catpicker.js';
 import {
-  addMinutes, dateKey, DAY_LETTER, DAY_LONG, esc, fmtDate, fmtTime, keyAddDays, parseLocal, startOfDay, toLocalISO, uid,
+  addDays, addMinutes, dateKey, DAY_LETTER, DAY_LONG, diffDays, esc, fmtDate, fmtTime, keyAddDays, parseLocal, startOfDay, toLocalISO, uid,
 } from '../util.js';
 
 const LAST_CAT = 'cdt.lastCategory';
@@ -30,7 +30,7 @@ export function openEditor(opts = {}) {
     const cat = store.getCategory(catId);
     const type = opts.type ?? cat?.defaultType ?? 'event';
     let start = null, allDay = !!opts.allDay, duration = opts.duration ?? cat?.defaultDuration ?? store.get().settings.defaultDuration ?? 60;
-    if (opts.date || type === 'event') {
+    if (opts.date || type === 'event' || type === 'task') {
       const d = opts.date ? parseLocal(opts.date) : new Date();
       if (allDay) duration = 1440;
       else if (opts.minutes != null) d.setHours(0, opts.minutes, 0, 0);
@@ -38,7 +38,10 @@ export function openEditor(opts = {}) {
       else d.setHours(9, 0, 0, 0);
       start = allDay ? `${dateKey(d)}T00:00` : toLocalISO(d);
     }
-    w = store.newItem({ type, title: opts.title ?? '', categoryId: catId, start, allDay, duration, ...(opts.extra ?? {}) });
+    // Las tareas, por defecto, sin duración (en curso hasta completarlas), salvo que se haya
+    // arrastrado un hueco concreto en el calendario
+    const openEnd = type === 'task' && opts.duration == null && !opts.allDay;
+    w = store.newItem({ type, title: opts.title ?? '', categoryId: catId, start, allDay, duration, openEnd, ...(opts.extra ?? {}) });
   }
   const isNew = !existing;
   // Edición de una sola aparición de una serie
@@ -73,7 +76,7 @@ export function openEditor(opts = {}) {
           <div class="row wrap">
             <label class="field">Fecha<input type="date" class="input" name="o_date" value="${dateKey(s)}"></label>
             ${existing.allDay ? '' : `<label class="field">Inicio<input type="time" class="input" name="o_time" value="${fmtTime(s)}"></label>
-            <label class="field">Fin<input type="time" class="input" name="o_end" value="${fmtTime(addMinutes(s, dur))}"></label>`}
+            ${existing.openEnd ? '' : `<label class="field">Fin<input type="time" class="input" name="o_end" value="${fmtTime(addMinutes(s, dur))}"></label>`}`}
           </div>
           ${existing.type === 'task' ? `<label class="check"><input type="checkbox" name="o_done" ${occ.done ? 'checked' : ''}> Hecha</label>` : ''}
           <p class="muted small">Los cambios solo afectan al ${fmtDate(occInst.start)}. El resto de la serie queda igual.</p>
@@ -113,8 +116,8 @@ export function openEditor(opts = {}) {
           </div>`;
 
         const showWhenToggle = w.type !== 'event';
-        const whenLabel = w.type === 'plan' ? 'Programar sesiones en la agenda' : 'Tiene fecha';
-        const when = `<fieldset class="box"><legend>Cuándo</legend>
+        const whenLabel = w.type === 'plan' ? 'Programar sesiones en la agenda' : 'Tiene fecha de inicio';
+        const when = w.type === 'task' ? taskWhenUI() : `<fieldset class="box"><legend>Cuándo</legend>
           ${showWhenToggle ? `<label class="check"><input type="checkbox" name="hasDate" ${w.start ? 'checked' : ''}> ${whenLabel}</label>` : ''}
           ${w.start ? `<div class="row wrap">
             <label class="field">Fecha<input type="date" class="input" name="date" value="${dateKey(s)}"></label>
@@ -153,6 +156,47 @@ export function openEditor(opts = {}) {
             <button type="button" class="btn" data-close>Cancelar</button>
             <button type="submit" class="btn primary" data-act="save">Guardar <kbd>Ctrl+↵</kbd></button>
           </div></form>`;
+      }
+
+      // ---------- Cuándo (tareas): inicio + duración indefinida o con atajos ----------
+      function taskDurations(s) {
+        const month = new Date(s);
+        month.setMonth(month.getMonth() + 1);
+        const days = (n) => n * 1440;
+        return [
+          ...(w.allDay ? [] : [['1h', '1 h', 60]]),
+          ['1d', '1 día', days(1)],
+          ['1w', '1 semana', days(7)],
+          ['1m', '1 mes', w.allDay ? days(diffDays(s, month)) : Math.round((month - s) / 60000)],
+        ];
+      }
+      function taskWhenUI() {
+        const s = w.start ? parseLocal(w.start) : null;
+        let body = '<p class="muted small">Sin fecha: la verás en Planning → «Tareas sin fecha».</p>';
+        if (s) {
+          const end = w.allDay ? addDays(s, Math.max(1, Math.round(w.duration / 1440)) - 1) : addMinutes(s, w.duration);
+          body = `<div class="row wrap">
+              <label class="field">Empieza<input type="date" class="input" name="date" value="${dateKey(s)}"></label>
+              ${w.allDay ? '' : `<label class="field">Hora<input type="time" class="input" name="time" value="${fmtTime(s)}"></label>`}
+              <label class="check self-end"><input type="checkbox" name="allDay" ${w.allDay ? 'checked' : ''}> Todo el día</label>
+            </div>
+            <div class="field">Duración</div>
+            <div class="chips">
+              <button type="button" class="chipbtn ${w.openEnd ? 'on' : ''}" data-tdur="open">∞ Sin fin</button>
+              ${taskDurations(s).map(([k, l, v]) => `<button type="button" class="chipbtn ${!w.openEnd && w.duration === v ? 'on' : ''}" data-tdur="${k}">${l}</button>`).join('')}
+            </div>
+            ${w.openEnd
+              ? '<p class="muted small">Queda «en curso» desde que empieza hasta que la marques como hecha. Si pasan los días sin completarla, seguirá apareciendo en el día de hoy.</p>'
+              : `<div class="row wrap">
+                  <label class="field">Termina<input type="date" class="input" name="tEndDate" value="${dateKey(end)}"></label>
+                  ${w.allDay ? '' : `<label class="field">Hora<input type="time" class="input" name="tEndTime" value="${fmtTime(end)}"></label>`}
+                </div>
+                <p class="muted small">Si llega el final sin completarla, queda como pendiente (aparece hoy y en Agenda / Planning).</p>`}
+            ${recurrenceUI()}`;
+        }
+        return `<fieldset class="box"><legend>Cuándo</legend>
+          <label class="check"><input type="checkbox" name="hasDate" ${w.start ? 'checked' : ''}> Tiene fecha de inicio</label>
+          ${body}</fieldset>`;
       }
 
       function recurrenceUI() {
@@ -224,12 +268,23 @@ export function openEditor(opts = {}) {
             <button type="button" class="icon-btn" data-rem-test="${r.level}" title="Probar">▶</button>
             ${inherit ? '' : '<button type="button" class="icon-btn" data-rem-del title="Quitar">✕</button>'}
           </div>`).join('');
-        const source = w.exam ? 'examen (Ajustes → Avisos)' : cat ? `«${esc(cat.name)}»` : 'los ajustes';
+        const source = w.exam ? 'examen (Ajustes → Avisos)' : w.type === 'task' ? 'tarea: a la hora de empezar (Ajustes → Avisos)' : cat ? `«${esc(cat.name)}»` : 'los ajustes';
+        // En las tareas lo habitual es avisar a la hora: esos botones van primero
+        const taskChips = `<div class="chips">
+            <button type="button" class="chipbtn" data-addrem="0,min,vibrate">＋ A la hora 📳</button>
+            <button type="button" class="chipbtn" data-addrem="0,min,sound">＋ A la hora 🔔</button>
+            <button type="button" class="chipbtn" data-addrem="0,min,alarm">＋ A la hora ⏰</button>
+            <button type="button" class="chipbtn" data-addrem="0,min,persistent">＋ A la hora 🚨</button>
+            <button type="button" class="chipbtn" data-addrem="10,min,vibrate">＋ 10 min antes 📳</button>
+            <button type="button" class="chipbtn" data-addrem="1,h,sound">＋ 1 h antes 🔔</button>
+            <button type="button" class="chipbtn" data-addrem="1,d,sound">＋ 1 día antes 🔔</button>
+            <button type="button" class="chipbtn" data-addrem="abs">＋ Fecha exacta</button>
+          </div>`;
         return `<fieldset class="box"><legend>Avisos</legend>
           ${w.type === 'event' ? `<label class="check"><input type="checkbox" name="exam" ${w.exam ? 'checked' : ''}> 📝 Es un examen (avisos de examen automáticos)</label>` : ''}
           <label class="check"><input type="checkbox" name="inheritRem" ${inherit ? 'checked' : ''}> Usar los avisos de ${source}</label>
           ${rows || '<div class="muted small">Sin avisos.</div>'}
-          ${inherit ? '' : `<div class="chips">
+          ${inherit ? '' : w.type === 'task' ? taskChips : `<div class="chips">
             <button type="button" class="chipbtn" data-addrem="10,min,vibrate">＋ 10 min 📳</button>
             <button type="button" class="chipbtn" data-addrem="30,min,sound">＋ 30 min 🔔</button>
             <button type="button" class="chipbtn" data-addrem="1,h,sound">＋ 1 h 🔔</button>
@@ -301,10 +356,18 @@ export function openEditor(opts = {}) {
           case 'hasDate':
             if (t.checked) {
               const d = new Date();
-              d.setHours(d.getHours() + 1, 0, 0, 0);
+              if (w.type === 'task') {
+                // Tarea: empieza en la próxima media hora y sin fin, salvo que se elija duración
+                d.setMinutes(Math.ceil((d.getMinutes() + 1) / 30) * 30, 0, 0);
+                w.openEnd = true;
+                w.allDay = false;
+                w.duration = 60;
+              } else {
+                d.setHours(d.getHours() + 1, 0, 0, 0);
+                w.allDay = false;
+                w.duration = 60;
+              }
               setStart(d);
-              w.allDay = w.type === 'task';
-              w.duration = w.allDay ? 1440 : 60;
             } else {
               w.start = null;
               w.recurrence = null;
@@ -353,6 +416,19 @@ export function openEditor(opts = {}) {
           case 'days':
             w.duration = Math.max(1, +t.value || 1) * 1440;
             break;
+          case 'tEndDate':
+          case 'tEndTime': {
+            // Fin de una tarea con duración: fecha (y hora) en que termina
+            const ed = body.querySelector('[name=tEndDate]')?.value;
+            if (!ed) return;
+            const s = S();
+            if (w.allDay) w.duration = Math.max(1, diffDays(s, parseLocal(ed)) + 1) * 1440;
+            else {
+              const et = body.querySelector('[name=tEndTime]')?.value || fmtTime(s);
+              w.duration = Math.max(15, Math.round((parseLocal(`${ed}T${et}`) - s) / 60000));
+            }
+            break;
+          }
           case 'freq':
             if (t.value === 'none') w.recurrence = null;
             else {
@@ -462,6 +538,8 @@ export function openEditor(opts = {}) {
         const tb = t.closest('[data-type]');
         if (tb) {
           w.type = tb.dataset.type;
+          // Al convertir en tarea uno nuevo: sin fin por defecto (como las tareas creadas desde cero)
+          if (isNew && w.type === 'task' && w.start && !w.allDay) w.openEnd = true;
           if (w.type === 'event' && !w.start) {
             const d = new Date();
             d.setHours(d.getHours() + 1, 0, 0, 0);
@@ -472,6 +550,13 @@ export function openEditor(opts = {}) {
         const dur = t.closest('[data-dur]');
         if (dur) {
           w.duration = +dur.dataset.dur;
+          return render();
+        }
+        const tdur = t.closest('[data-tdur]');
+        if (tdur) {
+          const k = tdur.dataset.tdur;
+          w.openEnd = k === 'open';
+          if (!w.openEnd) w.duration = taskDurations(S()).find(([key]) => key === k)[2];
           return render();
         }
         const wd = t.closest('[data-wd]');
@@ -618,9 +703,11 @@ export function openEditor(opts = {}) {
           if (!existing.allDay) {
             const [h, m] = q('o_time').value.split(':').map(Number);
             start.setHours(h, m);
-            const [eh, em] = q('o_end').value.split(':').map(Number);
-            dur = eh * 60 + em - (h * 60 + m);
-            if (dur <= 0) dur += 1440;
+            if (q('o_end')) {
+              const [eh, em] = q('o_end').value.split(':').map(Number);
+              dur = eh * 60 + em - (h * 60 + m);
+              if (dur <= 0) dur += 1440;
+            }
           }
           const patch = {};
           const ttl = q('o_title').value.trim();
@@ -638,6 +725,7 @@ export function openEditor(opts = {}) {
         }
         if (!w.title.trim()) w.title = w.type === 'task' ? 'Tarea' : w.type === 'plan' ? 'Planning' : 'Evento';
         w.title = w.title.trim();
+        if (w.type !== 'task') delete w.openEnd; // la duración indefinida solo existe en tareas
         if (w.recurrence && w.recurrence.freq === 'weekly' && !w.recurrence.byDay?.length) w.recurrence.byDay = [S().getDay()];
         try {
           localStorage.setItem(LAST_CAT, w.categoryId ?? '');

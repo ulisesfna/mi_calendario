@@ -1,17 +1,27 @@
 // Vista de agenda (lista de próximos días).
 import * as store from '../store.js';
-import { instancesInRange } from '../engine.js';
+import { instancesInRange, pendingTasks } from '../engine.js';
 import { ctx } from '../ui/dom.js';
 import { addDays, dateKey, DAY_LONG, esc, fmtTime, MONTHS, sameDay, startOfDay } from '../util.js';
 
-function rowHTML(inst) {
+const shortDate = (d) => `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
+
+function rowHTML(inst, { pending = false } = {}) {
   const it = inst.item;
   const cat = store.getCategory(it.categoryId);
   const checkable = it.type === 'task' || inst.kind === 'step';
-  const time = inst.allDay
-    ? '<span class="muted">todo el día</span>'
-    : `${fmtTime(inst.start)}<small>${fmtTime(inst.end)}</small>`;
+  let time;
+  if (inst.openEnd) time = `${inst.allDay ? '<span class="muted">día</span>' : fmtTime(inst.start)}<small>∞ sin fin</small>`;
+  else if (inst.long) time = `${fmtTime(inst.start)}<small>→ ${shortDate(addDays(inst.end, inst.end.getHours() || inst.end.getMinutes() ? 0 : -1))}</small>`;
+  else if (inst.allDay) time = '<span class="muted">todo el día</span>';
+  else time = `${fmtTime(inst.start)}<small>${fmtTime(inst.end)}</small>`;
+  const status = pending
+    ? inst.pending === 'overdue'
+      ? `<span class="tag warn-tag">⚠ venció el ${shortDate(inst.allDay ? addDays(inst.end, -1) : inst.end)}</span>`
+      : `<span class="tag">∞ en curso desde el ${shortDate(inst.start)}</span>`
+    : '';
   const meta = [
+    status,
     cat ? `<span class="cat-dot" style="--c:${cat.color}"></span>${esc(cat.name)}` : '',
     it.location ? `📍 ${esc(it.location)}` : '',
     inst.recurring ? '↻' : '',
@@ -25,7 +35,10 @@ function rowHTML(inst) {
       <div class="ag-title">${checkable ? `<span class="chip-check" data-check="${inst.id}">${inst.done ? '✔' : ''}</span>` : ''}${inst.icon ? inst.icon + ' ' : ''}${esc(inst.title)}</div>
       ${meta ? `<div class="ag-meta">${meta}</div>` : ''}
     </div>
-    ${inst.kind === 'item' && !inst.allDay ? `<div class="ag-quick">
+    ${pending ? `<div class="ag-move">
+      <button class="btn small" data-move="0" title="Pasarla a hoy">Hoy</button>
+      <button class="btn small" data-move="1" title="Pasarla a mañana">Mañana</button>
+    </div>` : inst.kind === 'item' && !inst.allDay ? `<div class="ag-quick">
       <button class="icon-btn" data-shift="-15" title="15 min antes">↑</button>
       <button class="icon-btn" data-shift="15" title="15 min después">↓</button>
     </div>` : ''}
@@ -41,11 +54,13 @@ export function renderAgenda(el) {
   const today = startOfDay(new Date());
   let html = '<div class="agenda">';
 
-  // Tareas atrasadas sin completar
+  // Tareas pendientes de días anteriores: vencidas sin hacer o «sin fin» que siguen en curso.
+  // Se quedan aquí hasta que las completes (o las pases a otro día).
   if (from <= today) {
-    const overdue = instancesInRange(addDays(today, -60), today, { types: ['task'], excludeOutOfAgenda: true }).filter((i) => !i.done && i.end <= new Date());
-    if (overdue.length) {
-      html += `<section class="ag-day overdue"><h3>⚠️ Tareas atrasadas</h3>${overdue.map(rowHTML).join('')}</section>`;
+    const pend = pendingTasks(new Date(), { agendaOnly: true }).filter((i) => i.pending === 'overdue' || i.start < today);
+    if (pend.length) {
+      html += `<section class="ag-day overdue"><h3>⏳ Pendientes <span class="count">${pend.length}</span></h3>
+        ${pend.map((i) => rowHTML(i, { pending: true })).join('')}</section>`;
     }
   }
 
@@ -61,7 +76,7 @@ export function renderAgenda(el) {
     const wd = DAY_LONG[d.getDay()];
     const label = sameDay(d, today) ? 'Hoy' : sameDay(d, addDays(today, 1)) ? 'Mañana' : wd[0].toUpperCase() + wd.slice(1);
     html += `<section class="ag-day ${sameDay(d, today) ? 'is-today' : ''}"><h3 data-goto="${k}"><span class="ag-dnum">${d.getDate()}</span> ${label}<span class="muted"> · ${d.getDate()} de ${MONTHS[d.getMonth()]}</span></h3>
-      ${list.map(rowHTML).join('')}</section>`;
+      ${list.map((i) => rowHTML(i)).join('')}</section>`;
   }
   html += `<button class="btn block" data-more>Ver más días</button></div>`;
   el.innerHTML = html;
@@ -72,6 +87,8 @@ export function renderAgenda(el) {
     if (check) return ctx.toggleDone(check.dataset.check);
     const sh = e.target.closest('[data-shift]');
     if (sh) return ctx.quickShift(sh.closest('[data-inst]').dataset.inst, +sh.dataset.shift);
+    const mv = e.target.closest('[data-move]');
+    if (mv) return ctx.moveTaskToDay(mv.closest('[data-inst]').dataset.inst, +mv.dataset.move);
     if (e.target.closest('[data-more]')) {
       ctx.agendaDays = days + 60;
       return ctx.render();

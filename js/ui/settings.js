@@ -48,6 +48,8 @@ export function openSettings() {
             </details>
             <div class="field">Avisos por defecto (para categorías sin avisos propios)</div>
             <div data-defrem>${remindersHTML(s.defaultReminders)}</div>
+            <div class="field">✅ Avisos de las tareas (por defecto, a la hora en que empiezan)</div>
+            <div data-taskrem>${remindersHTML(s.taskReminders)}</div>
             <div class="field">📝 Avisos de los exámenes (se aplican solos a los exámenes importados o marcados como examen)</div>
             <div data-examrem>${remindersHTML(s.examReminders)}</div>
             <details><summary>Próximos avisos (72 h): ${next.length}</summary>
@@ -146,6 +148,10 @@ export function openSettings() {
         saveSettings();
         render();
       }, saveSettings, '[data-defrem]');
+      wireReminders(body, () => (store.get().settings.taskReminders ??= []), () => {
+        saveSettings();
+        render();
+      }, saveSettings, '[data-taskrem]');
       wireReminders(body, () => (store.get().settings.examReminders ??= []), () => {
         saveSettings();
         render();

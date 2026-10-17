@@ -24,12 +24,18 @@ export function buildInstance(item, key) {
     start.setHours(base.getHours(), base.getMinutes());
   } else start = base;
   const duration = ov?.duration ?? item.duration ?? 60;
+  // Tarea de duración indefinida: empieza en `start` y sigue «en curso» hasta completarla.
+  // Para dibujarla se le da un hueco corto (30 min o el día).
+  const openEnd = item.type === 'task' && !!item.openEnd;
   let end;
   if (item.allDay) {
     start = startOfDay(start);
-    end = addDays(start, Math.max(1, Math.round(duration / 1440)));
-  } else end = addMinutes(start, Math.max(5, duration));
+    end = addDays(start, openEnd ? 1 : Math.max(1, Math.round(duration / 1440)));
+  } else end = addMinutes(start, openEnd ? 30 : Math.max(5, duration));
   return {
+    openEnd,
+    // Tareas de un día o más: se dibujan como barra en la fila «todo el día»
+    long: item.type === 'task' && !openEnd && !item.allDay && duration >= 1440,
     id: recurring ? `${item.id}|${key}` : item.id,
     kind: 'item',
     item,
@@ -102,6 +108,49 @@ export function instancesInRange(from, to, opts = {}) {
   }
   out.sort((a, b) => a.start - b.start || (b.allDay - a.allDay) || (b.end - b.start) - (a.end - a.start));
   return out;
+}
+
+/**
+ * Tareas sin completar cuyo momento ya pasó:
+ *  · pending 'overdue': tenían duración y ya terminó su plazo
+ *  · pending 'running': duración indefinida y ya empezaron (siguen en curso)
+ * Las repetitivas solo cuentan los últimos 30 días.
+ * opts.visibleOnly: respeta categorías ocultas, el filtro de tareas y «fuera de agenda».
+ */
+export function pendingTasks(now = new Date(), { visibleOnly = false, agendaOnly = false } = {}) {
+  const st = store.get();
+  const today0 = startOfDay(now);
+  const out = [];
+  for (const item of st.items) {
+    if (item.type !== 'task' || !item.start) continue;
+    if (visibleOnly && (!store.isCategoryVisible(item.categoryId) || st.settings.showTypes?.task === false)) continue;
+    if ((visibleOnly || agendaOnly) && !store.inAgenda(item)) continue;
+    const insts = item.recurrence
+      ? occurrenceKeys(item.start.slice(0, 10), item.recurrence, dateKey(addDays(today0, -30)), dateKey(now), holidaySkipper(item)).map((k) => buildInstance(item, k))
+      : [buildInstance(item, null)];
+    for (const inst of insts) {
+      if (inst.done) continue;
+      if (!inst.openEnd && inst.end <= now) out.push(Object.assign(inst, { pending: 'overdue' }));
+      else if (inst.openEnd && inst.start <= now) out.push(Object.assign(inst, { pending: 'running' }));
+    }
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** Pendientes de días anteriores que no se ven ya hoy: se «arrastran» a hoy en el calendario */
+export function rolledOverTasks(now = new Date()) {
+  if (store.get().settings.rollOver === false) return [];
+  const today0 = startOfDay(now);
+  return pendingTasks(now, { visibleOnly: true })
+    .filter((i) => (i.pending === 'overdue' ? i.end <= today0 : i.start < today0))
+    .map((i) => Object.assign(i, { rolled: true }));
+}
+
+/** Pasa una aparición a otro día manteniendo la hora (solo esa aparición si se repite) */
+export function moveToDay(inst, day) {
+  const ns = new Date(day);
+  ns.setHours(inst.start.getHours(), inst.start.getMinutes(), 0, 0);
+  return applyMove(inst, ns, null, 'one');
 }
 
 /** Recupera una aparición a partir de su id ("item", "item|fecha", "plan#paso") */

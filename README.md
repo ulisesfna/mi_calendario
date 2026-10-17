@@ -93,6 +93,9 @@ Doble clic en **`Abrir calendario.bat`** (usa Python). Se abre `http://localhost
 |---|---|
 | Crear categorías fácil | Barra lateral → **＋**, nombre y Enter (color automático). También desde el editor o con `#Nombre` en «Añadir rápido». Subcategorías plegables, icono, tipo y duración por defecto. |
 | Personalizar tareas | Prioridad, subtareas, fecha límite, icono, color, tono y avisos propios. |
+| Duración de las tareas | Por defecto **∞ sin fin**: empieza a una hora y queda «en curso» hasta completarla. Botones rápidos **1 h / 1 día / 1 semana / 1 mes** o fecha de fin a mano. Las de un día o más se ven como barra en «todo el día». |
+| Avisos de las tareas | Por defecto **a la hora en que empiezan** (*Ajustes → Avisos → Avisos de las tareas*). En el editor, los botones «a la hora» van primero; también se pueden poner avisos antes. |
+| Tareas pendientes | Las vencidas sin completar (⚠) y las «sin fin» de días anteriores (∞) se muestran **hoy** en el calendario y en **Agenda → ⏳ Pendientes** y **Planning → ⏳ Pendientes**, con botones *Hoy / Mañana*, hasta que las completes. Se puede desactivar en el menú 👁. |
 | **Planning** | Pasos con fecha opcional, fecha objetivo, progreso, sesiones recurrentes. Vista **Planning** agrupada por categoría. Encima de una clase se ve sólido y la clase de debajo translúcida; si dos plannings se solapan, ⚠. |
 | Mover antes / después | Ficha del evento: **−1 día / −1 h / −15′ / +15′ / +1 h / +1 día**, flechas del teclado, arrastrar (en el móvil, mantener pulsado). Solo esta / esta y siguientes / toda la serie. |
 | Avisos | Antelación libre y 5 niveles: 🔕 visual, 📳 vibración, 🔔 sonido, ⏰ alarma, 🚨 persistente. |

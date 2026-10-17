@@ -1,7 +1,7 @@
 // Vista Planning: plannings agrupados por categoría (p. ej. por asignatura),
 // tareas sin fecha y elementos que están fuera de la agenda.
 import * as store from '../store.js';
-import { instancesInRange, planProgress } from '../engine.js';
+import { instancesInRange, pendingTasks, planProgress } from '../engine.js';
 import { describeRule } from '../recurrence.js';
 import { ctx } from '../ui/dom.js';
 import { categoryButtonHTML, openCategoryPicker } from '../ui/catpicker.js';
@@ -95,7 +95,16 @@ export function renderPlanning(el) {
   // Columna lateral
   const undated = st.items.filter((i) => i.type === 'task' && !i.start && !i.done);
   const outside = st.items.filter((i) => !store.inAgenda(i));
+  const today0 = startOfDay(now);
+  const pend = pendingTasks(now).filter((i) => i.pending === 'overdue' || i.start < today0);
   html += `<aside class="planning-side">
+    <section class="side-box"><h3>⏳ Pendientes <span class="count">${pend.length}</span></h3>
+      <p class="muted small">Tareas vencidas sin completar y tareas sin fin que siguen en curso. Se quedan aquí hasta que las completes.</p>
+      ${pend.length ? pend.map((t) => `<div class="mini-row" data-inst="${t.id}" style="--c:${t.color}">
+          <span class="chip-check" data-pend-done></span>
+          <span class="mini-t" data-pend-open title="${t.pending === 'overdue' ? 'Venció' : 'En curso desde'} el ${fmtDate(t.pending === 'overdue' ? t.end : t.start)}">${t.pending === 'overdue' ? '⚠' : '∞'} ${esc(t.title)}</span>
+          <button class="btn small" data-pend-move="0">Hoy</button><button class="btn small" data-pend-move="1">Mañana</button></div>`).join('') : '<p class="muted small">Nada pendiente. 🎉</p>'}
+    </section>
     <section class="side-box"><h3>✅ Tareas sin fecha <span class="count">${undated.length}</span></h3>
       ${undated.length ? undated.map((t) => `<div class="mini-row" data-item="${t.id}" style="--c:${store.itemColor(t)}">
           <span class="chip-check" data-item-done></span><span class="mini-t" data-item-edit>${esc(t.title)}</span>
@@ -153,6 +162,12 @@ function wire(root) {
         }
         if (t.closest('[data-step-del]')) return store.mutate('Quitar paso', () => (plan.steps = plan.steps.filter((x) => x.id !== sid)));
       }
+    }
+    const prow = t.closest('[data-inst]');
+    if (prow) {
+      if (t.closest('[data-pend-done]')) return ctx.toggleDone(prow.dataset.inst);
+      if (t.closest('[data-pend-move]')) return ctx.moveTaskToDay(prow.dataset.inst, +t.closest('[data-pend-move]').dataset.pendMove);
+      if (t.closest('[data-pend-open]')) return ctx.openPopover(prow.dataset.inst, prow);
     }
     const row = t.closest('[data-item]');
     if (row) {
