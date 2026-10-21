@@ -141,8 +141,8 @@ function savedToken() {
 }
 
 /** Devuelve un token de acceso. Con interactive=false nunca abre ventanas. */
-async function getToken(interactive) {
-  const t = savedToken();
+async function getToken(interactive, { chooseAccount = false } = {}) {
+  const t = chooseAccount ? null : savedToken();
   if (t) return t;
   if (!interactive) throw Object.assign(new Error('Hace falta volver a entrar con Google'), { needsAuth: true });
   if (!clientId()) throw new Error('Falta el ID de cliente de Google (Ajustes → Sincronización)');
@@ -152,13 +152,17 @@ async function getToken(interactive) {
       client_id: clientId(),
       scope: SCOPES,
       callback: (r) => {
+        if (r.error === 'access_denied') {
+          return rej(new Error('Google ha denegado el acceso. Entra con la cuenta que añadiste como «usuario de prueba» en Google Cloud.'));
+        }
         if (r.error || !r.access_token) return rej(new Error(r.error_description || r.error || 'Acceso no concedido'));
         localStorage.setItem(TOKEN_KEY, JSON.stringify({ token: r.access_token, exp: Date.now() + (r.expires_in ?? 3600) * 1000 }));
         res(r.access_token);
       },
       error_callback: (e) => rej(new Error(e?.type === 'popup_closed' ? 'Se cerró la ventana de Google' : e?.message || 'No se pudo abrir la ventana de Google')),
     });
-    client.requestAccessToken({ prompt: '', login_hint: cfg.email ?? undefined });
+    // Al conectar, preguntar siempre con qué cuenta (si no, Chrome usa la que tenga por defecto)
+    client.requestAccessToken(chooseAccount ? { prompt: 'select_account' } : { prompt: '', login_hint: cfg.email ?? undefined });
   });
 }
 
@@ -235,7 +239,7 @@ const sameData = (a, b) =>
 export async function connect() {
   setStatus('syncing');
   try {
-    const token = await getToken(true);
+    const token = await getToken(true, { chooseAccount: true });
     const info = await (await api(token, 'https://www.googleapis.com/oauth2/v3/userinfo')).json();
     writeCfg({ email: info.email ?? null });
     const file = await findFile(token);
