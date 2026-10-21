@@ -30,7 +30,8 @@ export function openEditor(opts = {}) {
     const cat = store.getCategory(catId);
     const type = opts.type ?? cat?.defaultType ?? 'event';
     let start = null, allDay = !!opts.allDay, duration = opts.duration ?? cat?.defaultDuration ?? store.get().settings.defaultDuration ?? 60;
-    if (opts.date || type === 'event' || type === 'task') {
+    // Eventos, tareas y plannings nacen con fecha (los plannings, con una sesión en la agenda)
+    if (opts.date || type === 'event' || type === 'task' || type === 'plan') {
       const d = opts.date ? parseLocal(opts.date) : new Date();
       if (allDay) duration = 1440;
       else if (opts.minutes != null) d.setHours(0, opts.minutes, 0, 0);
@@ -268,7 +269,19 @@ export function openEditor(opts = {}) {
             <button type="button" class="icon-btn" data-rem-test="${r.level}" title="Probar">▶</button>
             ${inherit ? '' : '<button type="button" class="icon-btn" data-rem-del title="Quitar">✕</button>'}
           </div>`).join('');
-        const source = w.exam ? 'examen (Ajustes → Avisos)' : w.type === 'task' ? 'tarea: a la hora de empezar (Ajustes → Avisos)' : cat ? `«${esc(cat.name)}»` : 'los ajustes';
+        const source = w.exam ? 'examen (Ajustes → Avisos)'
+          : w.type === 'task' ? 'tarea: a la hora de empezar (Ajustes → Avisos)'
+          : w.type === 'plan' ? 'planning: al acabar la sesión (Ajustes → Avisos)'
+          : cat ? `«${esc(cat.name)}»` : 'los ajustes';
+        // Plannings: lo habitual es avisar al acabar la sesión
+        const planChips = `<div class="chips">
+            <button type="button" class="chipbtn" data-addrem="0,endmin,sound">＋ Al acabar 🔔</button>
+            <button type="button" class="chipbtn" data-addrem="0,endmin,vibrate">＋ Al acabar 📳</button>
+            <button type="button" class="chipbtn" data-addrem="0,endmin,alarm">＋ Al acabar ⏰</button>
+            <button type="button" class="chipbtn" data-addrem="5,endmin,vibrate">＋ 5 min antes de acabar 📳</button>
+            <button type="button" class="chipbtn" data-addrem="0,min,sound">＋ Al empezar 🔔</button>
+            <button type="button" class="chipbtn" data-addrem="10,min,vibrate">＋ 10 min antes de empezar 📳</button>
+          </div>`;
         // En las tareas lo habitual es avisar a la hora: esos botones van primero
         const taskChips = `<div class="chips">
             <button type="button" class="chipbtn" data-addrem="0,min,vibrate">＋ A la hora 📳</button>
@@ -284,7 +297,7 @@ export function openEditor(opts = {}) {
           ${w.type === 'event' ? `<label class="check"><input type="checkbox" name="exam" ${w.exam ? 'checked' : ''}> 📝 Es un examen (avisos de examen automáticos)</label>` : ''}
           <label class="check"><input type="checkbox" name="inheritRem" ${inherit ? 'checked' : ''}> Usar los avisos de ${source}</label>
           ${rows || '<div class="muted small">Sin avisos.</div>'}
-          ${inherit ? '' : w.type === 'task' ? taskChips : `<div class="chips">
+          ${inherit ? '' : w.type === 'task' ? taskChips : w.type === 'plan' ? planChips : `<div class="chips">
             <button type="button" class="chipbtn" data-addrem="10,min,vibrate">＋ 10 min 📳</button>
             <button type="button" class="chipbtn" data-addrem="30,min,sound">＋ 30 min 🔔</button>
             <button type="button" class="chipbtn" data-addrem="1,h,sound">＋ 1 h 🔔</button>
@@ -540,10 +553,12 @@ export function openEditor(opts = {}) {
           w.type = tb.dataset.type;
           // Al convertir en tarea uno nuevo: sin fin por defecto (como las tareas creadas desde cero)
           if (isNew && w.type === 'task' && w.start && !w.allDay) w.openEnd = true;
-          if (w.type === 'event' && !w.start) {
+          if ((w.type === 'event' || (w.type === 'plan' && isNew)) && !w.start) {
             const d = new Date();
-            d.setHours(d.getHours() + 1, 0, 0, 0);
+            d.setMinutes(Math.ceil((d.getMinutes() + 1) / 30) * 30, 0, 0); // próxima media hora
             setStart(d);
+            w.allDay = false;
+            w.duration = store.getCategory(w.categoryId)?.defaultDuration ?? 60;
           }
           return render('title');
         }

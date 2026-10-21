@@ -211,10 +211,8 @@ async function onClick(e) {
       closePopover();
       return ctx.setView('planning');
     case 'newplan': {
-      const plan = store.newItem({ type: 'plan', title: `Planning de ${store.getCategory(item.categoryId)?.name ?? ''}`, categoryId: item.categoryId, start: null });
-      store.mutate('Nuevo planning', (s) => s.items.push(plan));
       closePopover();
-      return ctx.openEditor({ itemId: plan.id });
+      return ctx.openEditor({ type: 'plan', title: `Planning de ${store.getCategory(item.categoryId)?.name ?? ''}`, categoryId: item.categoryId });
     }
   }
 }

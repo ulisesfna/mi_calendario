@@ -2,6 +2,7 @@
 import * as store from './store.js';
 import * as engine from './engine.js';
 import * as notify from './notify.js';
+import * as push from './push.js';
 import { ctx, $, toast, chooseScope, openModal, hasModal, closeTopModal, floatingMenu } from './ui/dom.js';
 import { openPopover, closePopover, renderPopover, popoverOpen, popoverId, shiftCurrent, deleteInstance } from './ui/popover.js';
 import { initPopover } from './ui/popover.js';
@@ -687,7 +688,8 @@ buildChrome();
 initPopover();
 store.subscribe(() => render());
 render();
-notify.init(() => renderBell());
+// Primero saber qué avisos llegaron ya con la app cerrada, para no repetirlos al abrirla
+push.init().catch(() => {}).finally(() => notify.init(() => renderBell()));
 setInterval(() => {
   updateNowLine($('#view'));
 }, 60000);

@@ -127,8 +127,9 @@ function wire(root) {
   root.querySelector('.new-plan').addEventListener('submit', (e) => {
     e.preventDefault();
     const f = e.target;
-    const item = store.newItem({ type: 'plan', title: f.title.value.trim(), categoryId: newPlanCat, start: null, steps: [] });
-    store.mutate('Nuevo planning', (s) => s.items.push(item));
+    // Se abre el editor con una sesión ya programada (próxima media hora), para ajustarla o quitarla
+    ctx.openEditor({ type: 'plan', title: f.title.value.trim(), categoryId: newPlanCat ?? undefined });
+    f.title.value = '';
   });
 
   root.addEventListener('click', (e) => {

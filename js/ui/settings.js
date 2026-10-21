@@ -5,6 +5,30 @@ import { exportICS } from '../ics.js';
 import { openModal, toast, confirmDialog, ctx } from './dom.js';
 import { remindersHTML, wireReminders } from './reminders-ui.js';
 import { settingsHTML as syncSettingsHTML, wireSettings as wireSyncSettings } from './syncui.js';
+import * as push from '../push.js';
+
+/** Avisos con la app cerrada (Web Push con el servidor de avisos) */
+function pushHTML() {
+  const p = push.status();
+  if (!p.supported) return '<p class="muted small">Este navegador no admite avisos con la app cerrada.</p>';
+  const when = p.lastUpload ? new Date(p.lastUpload).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+  return `<div class="push-box" data-push>
+    <div class="field">📲 Avisos con la app cerrada</div>
+    ${p.enabled
+      ? `<p class="small">✅ Activados en este dispositivo · ${p.count} avisos programados (30 días) · actualizado ${esc(when)}</p>
+         ${p.error ? `<p class="error-box small">${esc(p.error)}</p>` : ''}
+         <div class="row wrap">
+           <button type="button" class="btn small" data-push-act="test">Enviar prueba (llega en 1–2 min)</button>
+           <button type="button" class="btn small" data-push-act="upload">Actualizar ahora</button>
+           <button type="button" class="btn small danger" data-push-act="disable">Desactivar</button>
+         </div>
+         <p class="muted small">En Xiaomi: <i>Ajustes → Aplicaciones → Chrome → Ahorro de batería → Sin restricciones</i> y activa <i>Inicio automático</i>, o el sistema puede retrasar los avisos.</p>`
+      : `<p class="muted small">Necesita el servidor de avisos gratuito (README → «Avisos con la app cerrada»). Solo guarda horas y textos cifrados.</p>
+         <div class="row"><input class="input grow" name="pushUrl" placeholder="https://calendario-avisos.TU-USUARIO.workers.dev" value="${esc(p.url)}">
+         <button type="button" class="btn primary" data-push-act="enable">Activar</button></div>
+         ${p.error ? `<p class="error-box small">${esc(p.error)}</p>` : ''}`}
+  </div>`;
+}
 
 /** Instalar como aplicación (Android/escritorio: botón; iPhone: instrucciones) */
 function installHTML() {
@@ -35,6 +59,7 @@ export function openSettings() {
           <fieldset class="box"><legend>🔔 Avisos</legend>
             <div class="row wrap center">Notificaciones del sistema: <b>${permTxt}</b>
               ${perm === 'default' ? '<button class="btn primary small" data-act="perm">Permitir notificaciones</button>' : ''}</div>
+            ${pushHTML()}
             <div class="muted small">Prueba cada intensidad:</div>
             <div class="chips">${Object.entries(LEVELS).map(([k, l]) => `<button class="chipbtn" data-test="${k}">${l.icon} ${l.short}</button>`).join('')}</div>
             <div class="row wrap">
@@ -50,13 +75,16 @@ export function openSettings() {
             <div data-defrem>${remindersHTML(s.defaultReminders)}</div>
             <div class="field">✅ Avisos de las tareas (por defecto, a la hora en que empiezan)</div>
             <div data-taskrem>${remindersHTML(s.taskReminders)}</div>
+            <div class="field">🗺️ Avisos de los plannings (por defecto, al acabar cada sesión)</div>
+            <div data-planrem>${remindersHTML(s.planReminders)}</div>
             <div class="field">📝 Avisos de los exámenes (se aplican solos a los exámenes importados o marcados como examen)</div>
             <div data-examrem>${remindersHTML(s.examReminders)}</div>
             <details><summary>Próximos avisos (72 h): ${next.length}</summary>
               ${next.map((d) => `<div class="small">${fmtDate(new Date(d.at))} ${fmtTime(new Date(d.at))} — ${esc(d.inst.title)} <span class="muted">(${esc(describeReminder(d.r))})</span></div>`).join('') || '<div class="muted small">Ninguno.</div>'}
             </details>
-            <p class="muted small">Los avisos suenan mientras la app esté abierta (o instalada y en segundo plano, según el móvil).
-            Para alarmas garantizadas con la app cerrada hará falta la versión empaquetada para Android (ver LEEME).</p>
+            <p class="muted small">Con la app abierta, cada nivel suena y vibra como lo has configurado. Con la app cerrada (avisos del
+            servidor), Android usa el sonido y la vibración de las notificaciones de Chrome; las alarmas quedan fijas en pantalla y
+            las persistentes se repiten cada pocos minutos hasta que las pares.</p>
           </fieldset>
 
           <fieldset class="box"><legend>🎨 Apariencia</legend>
@@ -107,11 +135,38 @@ export function openSettings() {
 
       const set = (k, v) => store.quiet((st) => (st.settings[k] = v), true);
       wireSyncSettings(body, render);
+      body.addEventListener('click', async (e) => {
+        const act = e.target.closest('[data-push-act]')?.dataset.pushAct;
+        if (!act) return;
+        const btn = e.target.closest('button');
+        btn.disabled = true;
+        try {
+          if (act === 'enable') {
+            const u = body.querySelector('[name=pushUrl]')?.value.trim();
+            if (!/^https:\/\/.+/.test(u ?? '')) throw new Error('Pon la dirección https:// de tu servidor de avisos');
+            push.setServerUrl(u);
+            await push.enable();
+            toast('Avisos con la app cerrada activados');
+          } else if (act === 'test') {
+            await push.sendTest();
+            toast('Prueba programada: cierra la app y espera 1–2 minutos', { timeout: 8000 });
+          } else if (act === 'upload') {
+            await push.uploadNow();
+            toast(push.status().error ?? 'Avisos actualizados');
+          } else if (act === 'disable') {
+            await push.disable();
+            toast('Avisos con la app cerrada desactivados en este dispositivo');
+          }
+        } catch (err) {
+          toast(err.message, { timeout: 8000 });
+        }
+        render();
+      });
       body.addEventListener('click', (e) => e.target.closest('[data-install]') && ctx.promptInstall?.());
 
       body.addEventListener('change', async (e) => {
         const t = e.target;
-        if (t.closest('[data-sync]')) return;
+        if (t.closest('[data-sync]') || t.closest('[data-push]')) return;
         if (t.dataset.vib) {
           const pat = t.value.split(/[\s,;]+/).map(Number).filter((n) => n >= 0 && Number.isFinite(n));
           store.quiet((st) => (st.settings.vibration[t.dataset.vib] = pat));
@@ -152,6 +207,10 @@ export function openSettings() {
         saveSettings();
         render();
       }, saveSettings, '[data-taskrem]');
+      wireReminders(body, () => (store.get().settings.planReminders ??= []), () => {
+        saveSettings();
+        render();
+      }, saveSettings, '[data-planrem]');
       wireReminders(body, () => (store.get().settings.examReminders ??= []), () => {
         saveSettings();
         render();

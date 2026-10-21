@@ -331,8 +331,10 @@ export function exportICS(items) {
     }
     for (const rem of store.effectiveReminders(it)) {
       if (rem.unit === 'abs') continue;
-      const min = (rem.value | 0) * ({ min: 1, h: 60, d: 1440, w: 10080 }[rem.unit] ?? 1);
-      L.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(it.title)}`, `TRIGGER:-PT${min}M`, 'END:VALARM');
+      const min = (rem.value | 0) * ({ min: 1, h: 60, d: 1440, w: 10080, endmin: 1 }[rem.unit] ?? 1);
+      // Los avisos «antes de acabar» se miden respecto al final del evento
+      const trigger = rem.unit === 'endmin' ? `TRIGGER;RELATED=END:-PT${min}M` : `TRIGGER:-PT${min}M`;
+      L.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(it.title)}`, trigger, 'END:VALARM');
     }
     L.push('END:VEVENT');
   }

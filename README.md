@@ -81,6 +81,41 @@ En cada otro dispositivo, lo mismo con **la misma contraseña**.
 - Mientras el proyecto de Google está «en prueba», Google puede pedirte que vuelvas a aceptar los permisos cada pocos días.
 - En iPhone, si el inicio de sesión no vuelve a la app instalada, sincroniza una vez desde Safari.
 
+## 4. Avisos con la app cerrada (Android)
+
+Una app web no puede ejecutarse estando cerrada. Para que los avisos lleguen igualmente, un servidor
+gratuito manda un «toque» (Web Push) al móvil a la hora de cada aviso; el móvil despierta la app un instante,
+descifra el aviso y lo muestra.
+
+**Privacidad:** el servidor solo guarda la **hora** de cada aviso y su texto **cifrado** con tu clave
+(la de la sincronización, o una propia del dispositivo). No puede leer títulos ni nada de tu calendario.
+Si usas la sincronización, tus dispositivos comparten los avisos: lo que cambies en la tablet avisará también al móvil.
+
+**Crear el servidor (una vez, ~10 minutos, gratis, todo desde la web):**
+
+1. Crea una cuenta en <https://dash.cloudflare.com/sign-up> (plan **Free**).
+2. **Workers & Pages → Create → Create Worker** (plantilla «Hello World») → nombre `calendario-avisos` → **Deploy**.
+3. **Edit code**: borra todo, pega el contenido de **`servidor-avisos/worker.js`** → **Deploy**.
+4. **Storage & Databases → KV → Create** → nombre `calendario-avisos` → Add.
+5. Vuelve al Worker → **Settings → Bindings → Add → KV namespace** → *Variable name*: **`KV`** (en mayúsculas) → elige `calendario-avisos` → **Deploy**.
+6. **Settings → Triggers → Cron Triggers → Add** → *Cron expression*: **`* * * * *`** (cada minuto) → Add.
+7. Copia la dirección del Worker (`https://calendario-avisos.TU-USUARIO.workers.dev`). Si la abres en el navegador debe
+   decir `{"ok":true,"app":"calendario-avisos"}`.
+
+**Activarlo en cada dispositivo:** *Ajustes → Avisos → 📲 Avisos con la app cerrada* → pega la dirección → **Activar**
+(acepta el permiso de notificaciones). Pulsa **Enviar prueba**, cierra la app y espera 1–2 minutos.
+También puedes poner la dirección en `js/config.js` (`PUSH_SERVER_URL`) para no escribirla en cada dispositivo.
+
+**En Xiaomi**, para que el sistema no retrase los avisos: *Ajustes → Aplicaciones → Chrome →
+Ahorro de batería → Sin restricciones* y activa **Inicio automático**.
+
+**Cómo suenan con la app cerrada:** Android usa el sonido y la vibración de las notificaciones de Chrome
+(se cambian en *Ajustes del móvil → Aplicaciones → Chrome → Notificaciones*). 🔕 Visual llega en silencio;
+⏰ Alarma y 🚨 Persistente se quedan fijas en pantalla, y la persistente **se repite cada pocos minutos**
+(hasta 1 hora) hasta que pulses *Parar* o la quites. Con la app abierta, cada nivel suena como lo configuraste.
+La precisión es de ±1 minuto. Los avisos se programan para los próximos 30 días y la lista se renueva cada vez
+que abres o cierras la app, o cambias algo.
+
 ---
 
 ## Usarla solo en el PC
@@ -96,6 +131,7 @@ Doble clic en **`Abrir calendario.bat`** (usa Python). Se abre `http://localhost
 | Duración de las tareas | Por defecto **∞ sin fin**: empieza a una hora y queda «en curso» hasta completarla. Botones rápidos **1 h / 1 día / 1 semana / 1 mes** o fecha de fin a mano. Las de un día o más se ven como barra en «todo el día». |
 | Avisos de las tareas | Por defecto **a la hora en que empiezan** (*Ajustes → Avisos → Avisos de las tareas*). En el editor, los botones «a la hora» van primero; también se pueden poner avisos antes. |
 | Tareas pendientes | Las vencidas sin completar (⚠) y las «sin fin» de días anteriores (∞) se muestran **hoy** en el calendario y en **Agenda → ⏳ Pendientes** y **Planning → ⏳ Pendientes**, con botones *Hoy / Mañana*, hasta que las completes. Se puede desactivar en el menú 👁. |
+| Plannings en la agenda | Al crear un planning ya lleva **una sesión programada** (desde la próxima media hora, 1 h), así sale en el calendario y en Agenda. Al **acabar cada sesión** avisa con 🔔 vibración + sonido (*Ajustes → Avisos → Avisos de los plannings*; también «5 min antes de acabar», etc.). |
 | **Planning** | Pasos con fecha opcional, fecha objetivo, progreso, sesiones recurrentes. Vista **Planning** agrupada por categoría. Encima de una clase se ve sólido y la clase de debajo translúcida; si dos plannings se solapan, ⚠. |
 | Mover antes / después | Ficha del evento: **−1 día / −1 h / −15′ / +15′ / +1 h / +1 día**, flechas del teclado, arrastrar (en el móvil, mantener pulsado). Solo esta / esta y siguientes / toda la serie. |
 | Avisos | Antelación libre y 5 niveles: 🔕 visual, 📳 vibración, 🔔 sonido, ⏰ alarma, 🚨 persistente. |
@@ -107,12 +143,6 @@ Doble clic en **`Abrir calendario.bat`** (usa Python). Se abre `http://localhost
 | Agenda sí / no | 📅/🚫 en cada elemento o por categoría. Fuera de agenda: sin avisos automáticos ni vista Agenda; en Mes, como línea fina. |
 | Extra | Añadir rápido en lenguaje natural, acciones en bloque por categoría, festivos, deshacer (Ctrl+Z), modo oscuro, exportar a `.ics`. |
 
-## Límite: avisos con la app cerrada
-
-Una app web solo puede sonar mientras está abierta (o en segundo plano reciente); lo que tocaba con la
-app cerrada aparece en la campana como «perdido». Para alarmas garantizadas con la app cerrada hará
-falta una versión Android nativa (Capacitor + notificaciones locales).
-
 ## Estructura
 
 ```
@@ -121,6 +151,8 @@ js/config.js       ID de cliente de Google (para la sincronización)
 js/app.js          arranque, navegación, atajos, gestos, añadir rápido
 js/store.js        datos, guardado, deshacer y marcas de tiempo para sincronizar
 js/sync.js         cifrado + Google Drive + fusión
+js/push.js         avisos con la app cerrada (sube la lista cifrada al servidor de avisos)
+servidor-avisos/   código del servidor de avisos (Cloudflare Worker); no hace falta subirlo a GitHub
 js/engine.js       repeticiones → apariciones, mover / borrar / completar
 js/recurrence.js   reglas de repetición
 js/notify.js       avisos, sonidos y alarmas

@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS = {
   defaultReminders: [{ id: 'd1', value: 10, unit: 'min', level: 'vibrate' }],
   // Avisos de las tareas: por defecto, a la hora en que empiezan
   taskReminders: [{ id: 't1', value: 0, unit: 'min', level: 'sound' }],
+  // Avisos de los plannings: por defecto, al acabar cada sesión
+  planReminders: [{ id: 'p1', value: 0, unit: 'endmin', level: 'sound' }],
   // Las tareas sin completar de días anteriores se muestran también hoy
   rollOver: true,
   // Avisos automáticos de los exámenes (elementos marcados como examen)
@@ -286,6 +288,7 @@ export function effectiveReminders(item) {
   if (Array.isArray(item.reminders)) return item.reminders;
   if (item.exam) return state.settings.examReminders ?? [];
   if (item.type === 'task') return state.settings.taskReminders ?? [];
+  if (item.type === 'plan') return state.settings.planReminders ?? [];
   for (const c of categoryChain(item.categoryId)) {
     if (Array.isArray(c.reminders)) return c.reminders;
   }

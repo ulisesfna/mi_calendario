@@ -100,6 +100,12 @@ export function parseQuick(input, now = new Date()) {
 /** Convierte el resultado del análisis en campos de ítem */
 export function quickToItem(p, { defaultDuration = 60 } = {}) {
   const hasWhen = p.date || p.time || p.recurrence;
+  if (!hasWhen && p.type === 'plan') {
+    // Planning sin fecha: una sesión desde la próxima media hora, para que esté en la agenda
+    const d = new Date();
+    d.setMinutes(Math.ceil((d.getMinutes() + 1) / 30) * 30, 0, 0);
+    return { type: 'plan', title: p.title, start: toLocalISO(d), duration: p.duration ?? defaultDuration, allDay: false, inAgenda: p.inAgenda };
+  }
   if (!hasWhen) return { type: p.type, title: p.title, start: null, inAgenda: p.inAgenda };
   const date = p.date ?? startOfDay(new Date());
   const allDay = !p.time;

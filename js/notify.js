@@ -4,6 +4,7 @@ import { buildInstance } from './engine.js';
 import { occurrenceKeys } from './recurrence.js';
 import { addDays, dateKey, esc, fmtDate, fmtRelative, fmtTime, parseLocal, uid } from './util.js';
 import { toast } from './ui/dom.js';
+import * as push from './push.js';
 
 export const LEVELS = {
   visual: { label: 'Solo visual (silencioso)', short: 'Visual', icon: '🔕' },
@@ -18,6 +19,8 @@ export const UNITS = {
   h: { label: 'horas antes', mult: 60 },
   d: { label: 'días antes', mult: 1440 },
   w: { label: 'semanas antes', mult: 10080 },
+  // Respecto al FINAL (p. ej. «0 min antes de acabar» = al terminar la sesión)
+  endmin: { label: 'min antes de acabar', mult: 1, end: true },
   abs: { label: 'fecha y hora exactas', mult: 0 },
 };
 
@@ -29,6 +32,7 @@ export function describeReminder(r) {
     return `${LEVELS[r.level]?.icon ?? ''} ${d ? fmtDate(d) + ' ' + fmtTime(d) : '—'}`;
   }
   const v = r.value | 0;
+  if (r.unit === 'endmin') return `${LEVELS[r.level]?.icon ?? ''} ${v === 0 ? 'al acabar' : `${v} min antes de acabar`}`;
   const t = v === 0 ? 'a la hora' : `${v} ${({ min: 'min', h: 'h', d: v === 1 ? 'día' : 'días', w: v === 1 ? 'semana' : 'semanas' })[r.unit]} antes`;
   return `${LEVELS[r.level]?.icon ?? ''} ${t}`;
 }
@@ -192,15 +196,30 @@ function stopLoop() {
 
 // ---------------- Disparo ----------------
 
-function makeAlarm(inst, reminder) {
+/** Identificador único de un aviso concreto (aparición + aviso). Lo comparten la app y el servidor. */
+export const alarmKey = (inst, r) => `${inst.id}|${r.id ?? r.value + r.unit}`;
+
+/** Título y texto de un aviso. `now` permite calcularlo de antemano (avisos con la app cerrada). */
+export function alarmText(inst, reminder, now = Date.now()) {
   const when = inst.allDay ? fmtDate(inst.start) : `${fmtDate(inst.start)} · ${fmtTime(inst.start)}`;
-  const rel = fmtRelative(inst.start - Date.now());
+  const rel = fmtRelative(inst.start - now);
   const loc = inst.item.location ? ` · ${inst.item.location}` : '';
+  const atEnd = !!UNITS[reminder.unit]?.end;
+  const v = reminder.value | 0;
+  return {
+    title: `${atEnd ? (v ? '⏳ Acaba pronto: ' : '🏁 Fin: ') : ''}${inst.icon ? inst.icon + ' ' : ''}${inst.title}`,
+    body: atEnd
+      ? (v ? `Termina a las ${fmtTime(inst.end)} (en ${v} min)` : `Ha terminado la sesión (${fmtTime(inst.start)}–${fmtTime(inst.end)})`)
+      : `${when} (${rel})${loc}`,
+  };
+}
+
+function makeAlarm(inst, reminder) {
   return {
     id: uid(),
     instId: inst.id,
-    title: `${inst.icon ? inst.icon + ' ' : ''}${inst.title}`,
-    body: `${when} (${rel})${loc}`,
+    key: alarmKey(inst, reminder),
+    ...alarmText(inst, reminder),
     level: reminder.level ?? 'sound',
     color: inst.color,
     since: Date.now(),
@@ -210,6 +229,7 @@ function makeAlarm(inst, reminder) {
 
 export function fire(alarm) {
   const visible = document.visibilityState === 'visible';
+  if (alarm.key) push.markShown(alarm.key); // que el aviso con la app cerrada no lo repita
   store.quiet((s) => {
     s.notif.active = [...(s.notif.active ?? []).filter((a) => a.id !== alarm.id), alarm];
   });
@@ -235,6 +255,8 @@ export function test(level) {
 }
 
 export function ack(id, rerender = true) {
+  const a = activeAlarms().find((x) => x.id === id);
+  if (a?.key) push.ackRemote(a.key); // parar también las repeticiones del servidor
   store.quiet((s) => {
     s.notif.active = (s.notif.active ?? []).filter((a) => a.id !== id);
   });
@@ -265,8 +287,16 @@ export function clearMissed() {
 
 const offsetMin = (r) => (r.value | 0) * (UNITS[r.unit]?.mult ?? 1);
 
-/** Instante de referencia de una aparición (los de día completo avisan respecto a las 9:00) */
-const refTime = (inst) => (inst.allDay ? new Date(inst.start).setHours(9, 0, 0, 0) : inst.start.getTime());
+/**
+ * Instante de referencia de una aparición: el inicio o, para los avisos «antes de acabar», el final.
+ * Los de día completo avisan respecto a las 9:00 del primer día (o a las 20:00 del último).
+ */
+function refTime(inst, r) {
+  if (UNITS[r.unit]?.end) {
+    return inst.allDay ? addDays(inst.end, -1).setHours(20, 0, 0, 0) : inst.end.getTime();
+  }
+  return inst.allDay ? new Date(inst.start).setHours(9, 0, 0, 0) : inst.start.getTime();
+}
 
 /** Avisos que tocan en el intervalo (t0, t1] */
 export function dueBetween(t0, t1) {
@@ -285,12 +315,16 @@ export function dueBetween(t0, t1) {
         continue;
       }
       const off = offsetMin(r) * 60000;
-      const from = dateKey(addDays(new Date(t0 + off), -1));
+      const atEnd = !!UNITS[r.unit]?.end;
+      // Los avisos «al acabar» dependen del final: buscar también apariciones que empezaron antes
+      const extra = atEnd ? (item.duration ?? 60) * 60000 : 0;
+      const from = dateKey(addDays(new Date(t0 + off - extra), -1));
       const to = dateKey(new Date(t1 + off));
       for (const k of occurrenceKeys(item.start.slice(0, 10), item.recurrence, from, to)) {
         const inst = buildInstance(item, k);
         if (inst.done) continue;
-        const at = refTime(inst) - off;
+        if (atEnd && inst.openEnd) continue; // una tarea sin fin no «acaba»
+        const at = refTime(inst, r) - off;
         if (at > t0 && at <= t1) out.push({ inst, r, at });
       }
     }
@@ -306,9 +340,10 @@ export function tick() {
   const fired = st.notif.fired ?? {};
   const missed = [];
   for (const d of due) {
-    const fk = `${d.inst.id}|${d.r.id ?? d.r.value + d.r.unit}`;
+    const fk = alarmKey(d.inst, d.r);
     if (fired[fk]) continue;
     fired[fk] = now;
+    if (push.shownElsewhere(fk)) continue; // ya llegó con la app cerrada (aviso del servidor)
     const alarm = makeAlarm(d.inst, d.r);
     if (now - d.at > 5 * 60000) missed.push({ ...alarm, at: d.at });
     else fire(alarm);
