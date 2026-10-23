@@ -1,6 +1,6 @@
 // Service worker: funciona sin conexión y gestiona los botones de las notificaciones.
 // Al publicar una versión nueva, sube el número de VERSION para renovar la caché.
-const VERSION = 'cal-v13';
+const VERSION = 'cal-v14';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/app.js', 'js/util.js', 'js/store.js', 'js/palette.js', 'js/recurrence.js', 'js/engine.js', 'js/notify.js', 'js/ics.js', 'js/quickadd.js',
@@ -134,7 +134,10 @@ async function showPending() {
   for (const e of entries.sort((a, b) => a.at - b.at)) {
     const again = e.rep && shown[e.k]; // alarma persistente: se vuelve a avisar hasta que se pare
     if (shown[e.k] && !e.rep) continue;
-    if (visible && !again) continue; // con la app delante, la propia app ya avisa
+    // Con la app delante, la propia app avisa de lo suyo; pero las pruebas y los avisos pospuestos
+    // desde la notificación solo los conoce el servidor, así que se muestran siempre
+    const appKnowsIt = !e.k.startsWith('test-') && !e.k.includes('~');
+    if (visible && !again && appKnowsIt) continue;
     let d = null;
     try {
       if (key) d = await decrypt(key, e.c);
