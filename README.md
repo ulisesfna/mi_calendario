@@ -42,18 +42,22 @@ Los datos de `http://localhost:8765` no se mueven solos a la nueva dirección. D
 
 ## 3. Sincronización entre dispositivos (cifrada)
 
-**Cómo funciona**
+**Cómo funciona (no hay que hacer nada de esto, es para que sepas qué pasa)**
 
-- Inicias sesión con tu cuenta de Google y eliges una **contraseña de cifrado**.
-- Antes de salir del dispositivo, todo se cifra con **AES-256-GCM**, con una clave derivada de tu contraseña
-  (PBKDF2-SHA256, 600 000 iteraciones). **Google solo guarda datos ilegibles**.
-- Se guarda en la *carpeta oculta de la app* de tu Google Drive (`appDataFolder`): no aparece en «Mi unidad»
-  y la app **no puede ver ningún otro archivo** de tu Drive.
-- La contraseña no se guarda. En cada dispositivo queda una clave no exportable que la app no puede leer.
-- Los cambios hechos en varios dispositivos se fusionan: gana el cambio más reciente de cada elemento
-  y los borrados también se sincronizan. Se sincroniza al abrir la app, unos segundos después de cada cambio
-  y cada 3 minutos.
-- ⚠️ Si olvidas la contraseña, lo que hay en la nube no se puede recuperar (tus dispositivos conservan sus datos).
+Piensa en una **caja con candado** guardada en un cajón de Google:
+
+- **Tu cuenta de Google** es el cajón: el sitio donde se guarda la caja para que todos tus dispositivos la encuentren.
+  Se guarda en una carpeta oculta de tu Google Drive (no aparece en «Mi unidad»), y la app no puede ver ningún otro archivo tuyo.
+- **La contraseña de cifrado** es la llave del candado. **No es tu contraseña de Google**: es otra que te inventas en la app
+  la primera vez. Google guarda la caja pero **no tiene la llave**, así que solo ve datos ilegibles.
+- En cada dispositivo la escribes **una sola vez** (la misma en todos); después se sincroniza sola: al abrir la app,
+  unos segundos después de cada cambio y cada 3 minutos. Si cambias cosas en dos dispositivos, se juntan
+  (gana el cambio más reciente de cada elemento; lo borrado se borra en todos).
+- ⚠️ **Apunta la contraseña de cifrado en un sitio seguro.** Si la olvidas, lo guardado en la nube no se puede abrir
+  (ni Google ni nadie). Lo que tengas en tus dispositivos sí se mantiene.
+
+*Detalle técnico:* cifrado AES-256-GCM con una clave derivada de la contraseña (PBKDF2-SHA256, 600 000 iteraciones);
+la clave queda guardada en cada dispositivo de forma que ni la propia app puede extraerla.
 
 **Puesta en marcha (una sola vez, ~10 minutos, gratis)**
 
@@ -93,14 +97,20 @@ Si usas la sincronización, tus dispositivos comparten los avisos: lo que cambie
 
 **Crear el servidor (una vez, ~10 minutos, gratis, todo desde la web):**
 
+Son tres piezas: el **Worker** (el código), un **espacio KV** (el almacén) y el **enlace** entre ambos.
+
 1. Crea una cuenta en <https://dash.cloudflare.com/sign-up> (plan **Free**).
-2. **Workers & Pages → Create → Create Worker** (plantilla «Hello World») → nombre `calendario-avisos` → **Deploy**.
-3. **Edit code**: borra todo, pega el contenido de **`servidor-avisos/worker.js`** → **Deploy**.
-4. **Storage & Databases → KV → Create** → nombre `calendario-avisos` → Add.
-5. Vuelve al Worker → **Settings → Bindings → Add → KV namespace** → *Variable name*: **`KV`** (en mayúsculas) → elige `calendario-avisos` → **Deploy**.
-6. **Settings → Triggers → Cron Triggers → Add** → *Cron expression*: **`* * * * *`** (cada minuto) → Add.
-7. Copia la dirección del Worker (`https://calendario-avisos.TU-USUARIO.workers.dev`). Si la abres en el navegador debe
-   decir `{"ok":true,"app":"calendario-avisos"}`.
+2. **Workers & Pages → Create application** → (pestaña *Workers*) **Start with Hello World!** → ponle nombre
+   (p. ej. `calendario-avisos`) → **Deploy**.
+3. En el Worker: **Edit code** → borra todo, pega el contenido de **`servidor-avisos/worker.js`** → **Deploy**.
+4. **Storage & Databases → KV → Create** → cualquier nombre (p. ej. `KV`) → crear.
+5. Vuelve al **Worker** → pestaña **Bindings → Add binding → KV namespace** → *Variable name*: **`KV`**
+   (exactamente así) → elige el espacio KV del paso 4 → **Add binding** (se publica solo, no hay botón «Deploy»).
+6. En el Worker → **Settings → Trigger Events → Add → Cron Triggers** → expresión **`* * * * *`** (cada minuto) → **Add**.
+7. Comprueba: abre `https://TU-WORKER.TU-USUARIO.workers.dev/vapid` en el navegador.
+   - `{"publicKey":"B…"}` → todo bien.
+   - «Falta enlazar el espacio KV…» → revisa el paso 5 (la variable debe llamarse `KV`).
+   - «Hello World» → falta el paso 3.
 
 **Activarlo en cada dispositivo:** *Ajustes → Avisos → 📲 Avisos con la app cerrada* → pega la dirección → **Activar**
 (acepta el permiso de notificaciones). Pulsa **Enviar prueba**, cierra la app y espera 1–2 minutos.

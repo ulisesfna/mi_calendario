@@ -22,11 +22,18 @@ function pushHTML() {
            <button type="button" class="btn small" data-push-act="upload">Actualizar ahora</button>
            <button type="button" class="btn small danger" data-push-act="disable">Desactivar</button>
          </div>
-         <p class="muted small">En Xiaomi: <i>Ajustes → Aplicaciones → Chrome → Ahorro de batería → Sin restricciones</i> y activa <i>Inicio automático</i>, o el sistema puede retrasar los avisos.</p>`
+         <div class="row wrap">
+           <button type="button" class="btn small" data-push-act="diagnose">🩺 Diagnóstico</button>
+           <button type="button" class="btn small" data-push-act="local">Notificación ahora (sin servidor)</button>
+         </div>`
       : `<p class="muted small">Necesita el servidor de avisos gratuito (README → «Avisos con la app cerrada»). Solo guarda horas y textos cifrados.</p>
          <div class="row"><input class="input grow" name="pushUrl" placeholder="https://calendario-avisos.TU-USUARIO.workers.dev" value="${esc(p.url)}">
          <button type="button" class="btn primary" data-push-act="enable">Activar</button></div>
-         ${p.error ? `<p class="error-box small">${esc(p.error)}</p>` : ''}`}
+         ${p.error ? `<p class="error-box small">${esc(p.error)}</p>` : ''}
+         <div class="row wrap">
+           <button type="button" class="btn small" data-push-act="diagnose">🩺 Diagnóstico</button>
+           <button type="button" class="btn small" data-push-act="local">Notificación ahora (sin servidor)</button>
+         </div>`}
   </div>`;
 }
 
@@ -156,6 +163,22 @@ export function openSettings() {
           } else if (act === 'disable') {
             await push.disable();
             toast('Avisos con la app cerrada desactivados en este dispositivo');
+          } else if (act === 'local') {
+            await push.localTest();
+            toast('Notificación enviada: mira la barra de notificaciones');
+          } else if (act === 'diagnose') {
+            const list = await push.diagnose();
+            btn.disabled = false;
+            return openModal({
+              title: '🩺 Diagnóstico de avisos',
+              build(b) {
+                b.innerHTML = `<div class="diag">${list.map((x) => `<div class="diag-row ${x.ok === true ? 'ok' : x.ok === false ? 'bad' : 'info'}">
+                    <span class="diag-i">${x.ok === true ? '✅' : x.ok === false ? '❌' : 'ℹ️'}</span>
+                    <div><b>${esc(x.label)}</b>${x.detail ? `<div class="small muted">${esc(String(x.detail))}</div>` : ''}
+                    ${x.ok === false && x.hint ? `<div class="small diag-hint">👉 ${esc(x.hint)}</div>` : ''}</div></div>`).join('')}</div>
+                  <p class="muted small">Haz una captura de esta pantalla si necesitas ayuda.</p>`;
+              },
+            });
           }
         } catch (err) {
           toast(err.message, { timeout: 8000 });

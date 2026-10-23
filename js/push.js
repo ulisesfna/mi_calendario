@@ -42,8 +42,13 @@ export const status = () => ({
   count: cfg.count ?? 0, error: cfg.error ?? null, permission: 'Notification' in window ? Notification.permission : 'unsupported',
 });
 export const onStatus = (f) => listeners.add(f);
+/** Guarda solo el origen (https://…workers.dev), aunque se pegue con /vapid u otra ruta detrás */
 export function setServerUrl(u) {
-  write({ url: u.trim() });
+  let url = u.trim();
+  try {
+    url = new URL(url).origin;
+  } catch { /* se valida al activar */ }
+  write({ url });
 }
 
 // ---------------- IndexedDB compartida con el service worker ----------------
@@ -118,8 +123,23 @@ function deviceId() {
 }
 
 async function api(path, body) {
-  const r = await fetch(serverUrl() + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
-  const j = await r.json().catch(() => ({}));
+  let r;
+  try {
+    r = await fetch(serverUrl() + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  } catch {
+    throw new Error(`No se puede conectar con ${serverUrl()}. Revisa la dirección del servidor de avisos y la conexión.`);
+  }
+  const text = await r.text();
+  let j = null;
+  try {
+    j = JSON.parse(text);
+  } catch { /* no es JSON */ }
+  if (!j) {
+    const hint = /hello world/i.test(text)
+      ? 'El Worker todavía tiene el código de ejemplo: en Cloudflare, «Edit code», pega worker.js y pulsa «Deploy».'
+      : 'Esa dirección no responde como el servidor de avisos. Comprueba que es la de tu Worker y que tiene pegado worker.js.';
+    throw new Error(hint);
+  }
   if (!r.ok || j.error) throw new Error(j.error || `El servidor de avisos respondió ${r.status}`);
   return j;
 }
@@ -134,6 +154,9 @@ export async function enable() {
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') throw new Error('Sin permiso de notificaciones: actívalo en los ajustes del sitio en Chrome');
   const { publicKey } = await api('/vapid');
+  if (typeof publicKey !== 'string' || publicKey.length < 80) {
+    throw new Error('El servidor no ha devuelto su clave. En Cloudflare, comprueba que pegaste worker.js (Edit code → Deploy) y que el enlace KV se llama «KV».');
+  }
   const reg = await navigator.serviceWorker.ready;
   let sub = await reg.pushManager.getSubscription();
   if (sub) {
@@ -210,6 +233,72 @@ export async function sendTest() {
   const at = Date.now() + 60e3;
   testEntry = { k: `test-${at}`, at, rep: 0, c: await encrypt(key, { t: '🔔 Prueba de aviso', b: 'Si ves esto con la app cerrada, los avisos funcionan.', l: 'sound', i: null }) };
   await uploadNow();
+}
+
+// ---------------- Diagnóstico ----------------
+
+const ago = (t) => {
+  const m = Math.round((Date.now() - t) / 60000);
+  return m < 1 ? 'hace menos de 1 min' : m < 90 ? `hace ${m} min` : `hace ${Math.round(m / 60)} h`;
+};
+const at = (t) => new Date(t).toLocaleString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** Comprueba cada eslabón: permiso → service worker → suscripción → servidor → disparador → Google */
+export async function diagnose() {
+  const r = [];
+  const add = (ok, label, detail = '', hint = '') => r.push({ ok, label, detail, hint });
+  add(supported(), 'El navegador admite avisos en segundo plano', '', 'Usa Chrome (no el navegador de Xiaomi).');
+  const perm = 'Notification' in window ? Notification.permission : 'no disponible';
+  add(perm === 'granted', 'Permiso de notificaciones', perm,
+    'Ajustes del móvil → Aplicaciones → Calendario (o Chrome) → Notificaciones → permitir. Y en Chrome: ⋮ → Configuración → Notificaciones.');
+  const reg = await navigator.serviceWorker?.getRegistration().catch(() => null);
+  add(!!reg?.active, 'Service worker activo', reg?.active ? reg.active.scriptURL.split('/').slice(-1)[0] : 'no', 'Cierra la app del todo y ábrela otra vez.');
+  const sub = await reg?.pushManager?.getSubscription().catch(() => null);
+  add(!!sub, 'Este dispositivo está suscrito a los avisos', sub ? new URL(sub.endpoint).host : 'no', 'Pulsa «Activar» en Ajustes → Avisos.');
+  add(!!cfg.enabled && !!serverUrl(), 'Avisos con la app cerrada activados', serverUrl() || 'sin dirección del servidor', 'Pega la dirección de tu Worker y pulsa «Activar».');
+  const swCfg = await kvGet('cfg');
+  add(!!swCfg?.url, 'Datos para el service worker guardados', swCfg?.url ? `grupo ${String(swCfg.group).slice(0, 6)}…` : 'no', 'Pulsa «Actualizar ahora».');
+  if (!serverUrl()) return r;
+  let st = null;
+  try {
+    st = await api(`/status?g=${encodeURIComponent(groupId())}`);
+  } catch (e) {
+    add(false, 'El servidor responde', e.message, '');
+    return r;
+  }
+  add(st.version >= 2, 'Servidor con el código actualizado', st.version ? `versión ${st.version}` : 'versión antigua',
+    'En Cloudflare: Edit code → pega el worker.js nuevo → Deploy.');
+  add(!!st.lastCron && Date.now() - st.lastCron < 15 * 60e3, 'El disparador de cada minuto (Cron) funciona',
+    st.lastCron ? `última ejecución ${ago(st.lastCron)}` : 'nunca se ha ejecutado',
+    'En Cloudflare: Worker → Settings → Trigger Events → Add → Cron Triggers → * * * * *');
+  const g = st.group;
+  const mine = cfg.device?.slice(0, 6);
+  add(!!g && g.devicesList.includes(mine), 'Este dispositivo está registrado en el servidor',
+    g ? `${g.devices} dispositivo(s) en tu grupo` : 'el servidor no conoce tu grupo', 'Pulsa «Desactivar» y luego «Activar».');
+  add(!!g && g.entries > 0, 'Avisos programados en el servidor',
+    g ? `${g.next24h} en las próximas 24 h${g.next ? ` · el siguiente: ${at(g.next)}` : ''}` : '0',
+    'Pulsa «Actualizar ahora». Si sigue en 0, revisa que tus elementos tengan avisos y estén en la agenda.');
+  if (g?.lastPush) {
+    const res = g.lastPush.results?.[mine];
+    const ok = res === 201 || res === 200;
+    add(ok, 'Google aceptó el último toque para este dispositivo',
+      `${ago(g.lastPush.at)} · respuesta ${res ?? 'sin envío a este dispositivo'}`,
+      res === 403 || res === 401 ? 'Firma rechazada: pulsa «Desactivar» y «Activar» para renovar la suscripción.'
+        : res === 404 || res === 410 ? 'La suscripción caducó: pulsa «Desactivar» y «Activar».' : '');
+  } else {
+    add(null, 'Todavía no se ha enviado ningún toque', 'Pulsa «Enviar prueba» y vuelve a hacer el diagnóstico en 2 minutos.', '');
+  }
+  return r;
+}
+
+/** Notificación inmediata desde este dispositivo: comprueba si Android muestra las notificaciones de la app */
+export async function localTest() {
+  if (Notification.permission !== 'granted') await Notification.requestPermission();
+  const reg = await navigator.serviceWorker.ready;
+  await reg.showNotification('🔔 Notificación de prueba', {
+    body: 'Si la ves, Android muestra las notificaciones de la app.', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
+    vibrate: [300, 120, 300], tag: 'prueba-local',
+  });
 }
 
 // ---------------- Coordinación con el service worker ----------------
