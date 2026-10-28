@@ -42,7 +42,9 @@ export function openEditor(opts = {}) {
     // Las tareas, por defecto, sin duración (en curso hasta completarlas), salvo que se haya
     // arrastrado un hueco concreto en el calendario
     const openEnd = type === 'task' && opts.duration == null && !opts.allDay;
-    w = store.newItem({ type, title: opts.title ?? '', categoryId: catId, start, allDay, duration, openEnd, ...(opts.extra ?? {}) });
+    // Los plannings nuevos van siempre a la agenda (aunque su categoría esté fuera de ella)
+    const inAgenda = type === 'plan' ? true : null;
+    w = store.newItem({ type, title: opts.title ?? '', categoryId: catId, start, allDay, duration, openEnd, inAgenda, ...(opts.extra ?? {}) });
   }
   const isNew = !existing;
   // Edición de una sola aparición de una serie
@@ -508,7 +510,9 @@ export function openEditor(opts = {}) {
           rerender = false;
         }
         if (t.dataset.st === 'done') {
-          w.steps[+t.closest('[data-si]').dataset.si].done = t.checked;
+          const stp = w.steps[+t.closest('[data-si]').dataset.si];
+          stp.done = t.checked;
+          stp.doneAt = t.checked ? Date.now() : null;
           rerender = false;
         }
         if (t.dataset.st === 'date') {
@@ -553,6 +557,7 @@ export function openEditor(opts = {}) {
           w.type = tb.dataset.type;
           // Al convertir en tarea uno nuevo: sin fin por defecto (como las tareas creadas desde cero)
           if (isNew && w.type === 'task' && w.start && !w.allDay) w.openEnd = true;
+          if (isNew && w.type === 'plan') w.inAgenda = true;
           if ((w.type === 'event' || (w.type === 'plan' && isNew)) && !w.start) {
             const d = new Date();
             d.setMinutes(Math.ceil((d.getMinutes() + 1) / 30) * 30, 0, 0); // próxima media hora

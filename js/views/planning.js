@@ -1,7 +1,7 @@
 // Vista Planning: plannings agrupados por categoría (p. ej. por asignatura),
 // tareas sin fecha y elementos que están fuera de la agenda.
 import * as store from '../store.js';
-import { instancesInRange, pendingTasks, planProgress } from '../engine.js';
+import { instancesInRange, isPlanArchived, pendingTasks, planEnd, planProgress } from '../engine.js';
 import { describeRule } from '../recurrence.js';
 import { ctx } from '../ui/dom.js';
 import { categoryButtonHTML, openCategoryPicker } from '../ui/catpicker.js';
@@ -43,9 +43,14 @@ function planCard(p) {
   </article>`;
 }
 
+let showArchived = false; // ver los plannings que terminaron hace más de 3 días
+
 export function renderPlanning(el) {
   const st = store.get();
-  const plans = st.items.filter((i) => i.type === 'plan');
+  const allPlans = st.items.filter((i) => i.type === 'plan');
+  // Los terminados hace más de 3 días salen de esta pestaña (siguen en el calendario)
+  const archived = allPlans.filter((p) => isPlanArchived(p));
+  const plans = allPlans.filter((p) => !archived.includes(p));
   const groups = new Map();
   for (const p of plans) {
     const k = p.categoryId ?? '';
@@ -65,7 +70,7 @@ export function renderPlanning(el) {
           <button class="btn primary">Crear</button>
         </form>
       </div>`;
-  if (!plans.length) {
+  if (!allPlans.length) {
     html += `<div class="empty">
       <p><b>¿Qué es un planning?</b> Un plan con pasos (y fechas opcionales) vinculado a una categoría.
       Por ejemplo, pon cada asignatura del horario en su categoría y crea aquí su planning de estudio:
@@ -88,6 +93,13 @@ export function renderPlanning(el) {
         ${info ? `<div class="plan-group-info">${info}</div>` : ''}
       </header>
       <div class="plan-cards">${list.sort((a, b) => (a.deadline ?? '9') < (b.deadline ?? '9') ? -1 : 1).map(planCard).join('')}</div>
+    </section>`;
+  }
+  if (archived.length) {
+    html += `<section class="plan-archive">
+      <button class="btn small" data-toggle-archive>📦 ${showArchived ? 'Ocultar' : 'Ver'} terminados (${archived.length})</button>
+      <span class="muted small">Los plannings salen de aquí 3 días después de terminar; en el calendario siguen apareciendo.</span>
+      ${showArchived ? `<div class="plan-cards">${archived.sort((a, b) => (planEnd(b) ?? 0) - (planEnd(a) ?? 0)).map(planCard).join('')}</div>` : ''}
     </section>`;
   }
   html += '</div>';
@@ -134,6 +146,10 @@ function wire(root) {
 
   root.addEventListener('click', (e) => {
     const t = e.target;
+    if (t.closest('[data-toggle-archive]')) {
+      showArchived = !showArchived;
+      return ctx.render();
+    }
     if (t.closest('[data-cat-edit]')) return ctx.openCategory(t.closest('[data-cat-edit]').dataset.catEdit);
     const pick = t.closest('[data-act="newplan-cat"]');
     if (pick) {
@@ -159,6 +175,7 @@ function wire(root) {
           return store.mutate('Paso', () => {
             const s = plan.steps.find((x) => x.id === sid);
             s.done = !s.done;
+            s.doneAt = s.done ? Date.now() : null; // para saber cuándo terminó el planning
           });
         }
         if (t.closest('[data-step-del]')) return store.mutate('Quitar paso', () => (plan.steps = plan.steps.filter((x) => x.id !== sid)));

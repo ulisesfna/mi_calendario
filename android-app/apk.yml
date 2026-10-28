@@ -1,0 +1,76 @@
+# Compila la app de Android (APK) cada vez que subes cambios y la publica en «Releases».
+# Enlace fijo de descarga: https://github.com/USUARIO/REPOSITORIO/releases/latest/download/Calendario.apk
+# Necesita el secreto APK_KEYSTORE (la llave de firma; ver README → «App de Android»).
+name: App Android (APK)
+
+on:
+  push:
+    paths-ignore:
+      - 'README.md'
+      - 'servidor-avisos/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BUILD: ${{ github.run_number }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Llave de firma (siempre la misma, para poder actualizar encima)
+        env:
+          APK_KEYSTORE: ${{ secrets.APK_KEYSTORE }}
+        run: |
+          if [ -z "$APK_KEYSTORE" ]; then
+            echo "::error::Falta el secreto APK_KEYSTORE. Ver README → «App de Android» → paso 2."
+            exit 1
+          fi
+          echo "$APK_KEYSTORE" | base64 -d > "$RUNNER_TEMP/llave.p12"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/llave.p12" >> "$GITHUB_ENV"
+
+      - name: Preparar el proyecto Android
+        working-directory: android-app
+        run: |
+          npm install --no-audit --no-fund
+          python3 preparar.py
+          npx cap add android
+          python3 parchear.py
+          npx cap sync android
+
+      - name: Compilar
+        working-directory: android-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android-app/android/app/build/outputs/apk/debug/app-debug.apk Calendario.apk
+          tag="v${BUILD}"
+          gh release create "$tag" Calendario.apk --title "Mi calendario $tag" --latest \
+            --notes "Descarga **Calendario.apk** en el móvil y ábrelo para instalar o actualizar (tus datos se conservan)."
+          # Borrar las versiones anteriores (solo se guarda la última)
+          for old in $(gh release list --limit 100 --json tagName --jq '.[].tagName'); do
+            if [ "$old" != "$tag" ]; then gh release delete "$old" --cleanup-tag --yes || true; fi
+          done

@@ -1,0 +1,12 @@
+{
+  "name": "mi-calendario-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Envoltorio Android (Capacitor) de Mi calendario. Lo compila GitHub Actions: .github/workflows/apk.yml",
+  "dependencies": {
+    "@capacitor/android": "7.6.9",
+    "@capacitor/app": "7.1.2",
+    "@capacitor/cli": "7.6.9",
+    "@capacitor/core": "7.6.9"
+  }
+}

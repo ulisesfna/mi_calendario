@@ -385,6 +385,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .plan-group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .plan-group-head h3 { font-size: 16px; }
 .plan-group-info { width: 100%; font-size: 12.5px; color: var(--muted); }
+.plan-archive { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 4px 2px; }
+.plan-archive .plan-cards { width: 100%; opacity: .75; }
 .plan-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .plan-card { border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; background: var(--bg); display: flex; flex-direction: column; gap: 8px; border-left: 4px solid var(--c); min-width: 0; }
 .plan-card header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

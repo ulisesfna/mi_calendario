@@ -7,9 +7,11 @@
 //   despierta, pide los avisos pendientes, los descifra y muestra la notificación.
 // · La lista se vuelve a subir al abrir la app, al salir de ella y tras cada cambio.
 import * as store from './store.js';
-import { PUSH_SERVER_URL } from './config.js';
+import { serverUrl, setServerUrl, api } from './server.js';
 import { alarmKey, alarmText, dueBetween } from './notify.js';
 import { uid } from './util.js';
+
+export { serverUrl, setServerUrl };
 
 const CFG_KEY = 'cdt.push';
 const HORIZON_DAYS = 30;
@@ -35,21 +37,12 @@ function write(patch) {
   listeners.forEach((f) => f(status()));
 }
 
-export const serverUrl = () => (cfg.url || PUSH_SERVER_URL || '').replace(/\/+$/, '');
 export const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 export const status = () => ({
   supported: supported(), url: serverUrl(), enabled: !!cfg.enabled, lastUpload: cfg.lastUpload ?? null,
   count: cfg.count ?? 0, error: cfg.error ?? null, permission: 'Notification' in window ? Notification.permission : 'unsupported',
 });
 export const onStatus = (f) => listeners.add(f);
-/** Guarda solo el origen (https://…workers.dev), aunque se pegue con /vapid u otra ruta detrás */
-export function setServerUrl(u) {
-  let url = u.trim();
-  try {
-    url = new URL(url).origin;
-  } catch { /* se valida al activar */ }
-  write({ url });
-}
 
 // ---------------- IndexedDB compartida con el service worker ----------------
 
@@ -122,28 +115,6 @@ function deviceId() {
   return cfg.device;
 }
 
-async function api(path, body) {
-  let r;
-  try {
-    r = await fetch(serverUrl() + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
-  } catch {
-    throw new Error(`No se puede conectar con ${serverUrl()}. Revisa la dirección del servidor de avisos y la conexión.`);
-  }
-  const text = await r.text();
-  let j = null;
-  try {
-    j = JSON.parse(text);
-  } catch { /* no es JSON */ }
-  if (!j) {
-    const hint = /hello world/i.test(text)
-      ? 'El Worker todavía tiene el código de ejemplo: en Cloudflare, «Edit code», pega worker.js y pulsa «Deploy».'
-      : 'Esa dirección no responde como el servidor de avisos. Comprueba que es la de tu Worker y que tiene pegado worker.js.';
-    throw new Error(hint);
-  }
-  if (!r.ok || j.error) throw new Error(j.error || `El servidor de avisos respondió ${r.status}`);
-  return j;
-}
-
 const b64urlToBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
 
 // ---------------- Activar / desactivar ----------------
@@ -171,6 +142,32 @@ export async function enable() {
   await api('/subscribe', { group: groupId(), device: deviceId(), sub: sub.toJSON() });
   write({ enabled: true, error: null, subscribedGroup: groupId() });
   await uploadNow();
+}
+
+/**
+ * Reparación automática: Android/Chrome a veces anulan la suscripción (ahorro de batería,
+ * limpiezas, renovación interna). Al abrir la app y cada pocas horas se comprueba y, si falta,
+ * se vuelve a crear sin preguntar nada (el permiso ya está concedido) y se registra en el servidor.
+ */
+export async function ensureSubscribed() {
+  if (!cfg.enabled || !serverUrl() || !supported() || Notification.permission !== 'granted') return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    let repaired = false;
+    if (!sub) {
+      const { publicKey } = await api('/vapid');
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(publicKey) });
+      repaired = true;
+    }
+    // Registrar siempre (es idempotente): así el servidor recupera el dispositivo si lo había borrado
+    await api('/subscribe', { group: groupId(), device: deviceId(), sub: sub.toJSON() });
+    write({ subscribedGroup: groupId(), ...(repaired ? { lastRepair: Date.now() } : {}), error: null });
+    return true;
+  } catch (e) {
+    write({ error: `No se pudo renovar la suscripción: ${e.message}` });
+    return false;
+  }
 }
 
 export async function disable() {
@@ -213,7 +210,7 @@ export async function uploadNow() {
     }
     if (testEntry && testEntry.at > now - 120e3) entries.push(testEntry);
     // Lo que necesita el service worker para pedir y descifrar los avisos
-    await kvSet('cfg', { url: serverUrl(), group: groupId(), keySource: source, repeatMin: store.get().settings.persistentRepeatMin || 2 });
+    await kvSet('cfg', { url: serverUrl(), group: groupId(), device: deviceId(), keySource: source, repeatMin: store.get().settings.persistentRepeatMin || 2 });
     await api('/schedule', { group: groupId(), entries, repeatMin: store.get().settings.persistentRepeatMin || 2 });
     write({ lastUpload: Date.now(), count: entries.length, error: null });
   } catch (e) {
@@ -253,8 +250,12 @@ export async function diagnose() {
     'Ajustes del móvil → Aplicaciones → Calendario (o Chrome) → Notificaciones → permitir. Y en Chrome: ⋮ → Configuración → Notificaciones.');
   const reg = await navigator.serviceWorker?.getRegistration().catch(() => null);
   add(!!reg?.active, 'Service worker activo', reg?.active ? reg.active.scriptURL.split('/').slice(-1)[0] : 'no', 'Cierra la app del todo y ábrela otra vez.');
+  // Antes de comprobar, intentar la reparación automática (como al abrir la app)
+  await ensureSubscribed();
   const sub = await reg?.pushManager?.getSubscription().catch(() => null);
-  add(!!sub, 'Este dispositivo está suscrito a los avisos', sub ? new URL(sub.endpoint).host : 'no', 'Pulsa «Activar» en Ajustes → Avisos.');
+  add(!!sub, 'Este dispositivo está suscrito a los avisos',
+    sub ? `${new URL(sub.endpoint).host}${cfg.lastRepair ? ` · renovada automáticamente ${ago(cfg.lastRepair)}` : ''}` : 'no',
+    'Pulsa «Activar» en Ajustes → Avisos.');
   add(!!cfg.enabled && !!serverUrl(), 'Avisos con la app cerrada activados', serverUrl() || 'sin dirección del servidor', 'Pega la dirección de tu Worker y pulsa «Activar».');
   const swCfg = await kvGet('cfg');
   add(!!swCfg?.url, 'Datos para el service worker guardados', swCfg?.url ? `grupo ${String(swCfg.group).slice(0, 6)}…` : 'no', 'Pulsa «Actualizar ahora».');
@@ -284,7 +285,7 @@ export async function diagnose() {
     add(ok, 'Google aceptó el último toque para este dispositivo',
       `${ago(g.lastPush.at)} · respuesta ${res ?? 'sin envío a este dispositivo'}`,
       res === 403 || res === 401 ? 'Firma rechazada: pulsa «Desactivar» y «Activar» para renovar la suscripción.'
-        : res === 404 || res === 410 ? 'La suscripción caducó: pulsa «Desactivar» y «Activar».' : '');
+        : res === 404 || res === 410 ? 'La suscripción había caducado. La app la renueva sola al abrirse: cierra y abre la app y repite el diagnóstico.' : '');
   } else {
     add(null, 'Todavía no se ha enviado ningún toque', 'Pulsa «Enviar prueba» y vuelve a hacer el diagnóstico en 2 minutos.', '');
   }
@@ -335,8 +336,12 @@ export async function init() {
   store.onDataChange(() => scheduleUpload());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') uploadNow();
-    else refreshShown();
+    else {
+      refreshShown();
+      ensureSubscribed();
+    }
   });
-  setTimeout(uploadNow, 3000);
-  setInterval(uploadNow, 6 * 3600e3);
+  // Al abrir: comprobar la suscripción (y repararla) y después subir la lista de avisos
+  setTimeout(() => ensureSubscribed().finally(uploadNow), 2000);
+  setInterval(() => ensureSubscribed().finally(uploadNow), 6 * 3600e3);
 }

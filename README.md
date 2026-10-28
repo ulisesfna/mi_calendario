@@ -2,8 +2,8 @@
 
 Calendario personal con **eventos, tareas y planning**, categorías fáciles de crear,
 avisos de varias intensidades, importación de horarios de Chronos (UB) y
-**sincronización cifrada** entre dispositivos con tu cuenta de Google.
-Es una app web instalable (PWA): funciona en el ordenador y en el móvil, también sin conexión.
+**sincronización cifrada** entre dispositivos a través de tu propio servidor gratuito (Cloudflare).
+Es una app web instalable (PWA) para el ordenador y, en Android, una **app propia (APK)** con alarmas de verdad.
 
 ---
 
@@ -25,67 +25,48 @@ El móvil coge la versión nueva al abrir la app (a veces hace falta cerrarla y 
 
 ## 2. Instalarla como aplicación
 
-- **Android (Chrome):** abre la dirección de GitHub Pages → menú **⋮** → **Instalar aplicación**
-  (o el botón **📲 Instalar** de la barra lateral). Queda con su icono, a pantalla completa y funciona sin conexión.
-- **iPhone (Safari):** botón **Compartir** → **Añadir a pantalla de inicio**.
+- **Android:** la **app propia (APK)**, ver el apartado 5. Las alarmas las programa el propio móvil, así que
+  suenan con la app cerrada, sin internet y sin depender de Chrome.
 - **PC:** en Chrome/Edge, el icono de instalar de la barra de direcciones.
-- **APK de Android (opcional):** en <https://www.pwabuilder.com> pega la dirección de GitHub Pages
-  → *Package for stores* → **Android** → descarga el `.apk`/`.aab` (sirve para instalarla o subirla a Google Play).
+- **iPhone (Safari):** botón **Compartir** → **Añadir a pantalla de inicio**.
 
 ### Pasar los datos que ya tienes en el PC
 
 Los datos de `http://localhost:8765` no se mueven solos a la nueva dirección. Dos opciones:
 
-- **Con la sincronización** (recomendado, ver abajo): conéctala primero en el PC (añadiendo también
-  `http://localhost:8765` como origen autorizado) y después en la versión de GitHub y en el móvil.
+- **Con la sincronización** (recomendado, ver abajo): conéctala en el PC y después en los demás dispositivos.
 - **Con una copia:** en el PC *Ajustes → Copia de seguridad (.json)* y en la nueva *Ajustes → Restaurar copia*.
 
 ## 3. Sincronización entre dispositivos (cifrada)
 
 **Cómo funciona (no hay que hacer nada de esto, es para que sepas qué pasa)**
 
-Piensa en una **caja con candado** guardada en un cajón de Google:
+Piensa en una **caja con candado** guardada en tu servidor de Cloudflare (el del apartado 4):
 
-- **Tu cuenta de Google** es el cajón: el sitio donde se guarda la caja para que todos tus dispositivos la encuentren.
-  Se guarda en una carpeta oculta de tu Google Drive (no aparece en «Mi unidad»), y la app no puede ver ningún otro archivo tuyo.
-- **La contraseña de cifrado** es la llave del candado. **No es tu contraseña de Google**: es otra que te inventas en la app
-  la primera vez. Google guarda la caja pero **no tiene la llave**, así que solo ve datos ilegibles.
+- **El servidor** es el sitio donde se guarda la caja para que todos tus dispositivos la encuentren.
+- **La contraseña de sincronización** es la llave del candado. Te la inventas en la app la primera vez.
+  El servidor guarda la caja pero **no tiene la llave**, así que solo ve datos ilegibles. Con la contraseña
+  se encuentra también tu caja: sin ella nadie puede ni encontrarla ni sobrescribirla.
 - En cada dispositivo la escribes **una sola vez** (la misma en todos); después se sincroniza sola: al abrir la app,
   unos segundos después de cada cambio y cada 3 minutos. Si cambias cosas en dos dispositivos, se juntan
   (gana el cambio más reciente de cada elemento; lo borrado se borra en todos).
-- ⚠️ **Apunta la contraseña de cifrado en un sitio seguro.** Si la olvidas, lo guardado en la nube no se puede abrir
-  (ni Google ni nadie). Lo que tengas en tus dispositivos sí se mantiene.
+- ⚠️ **Apunta la contraseña en un sitio seguro.** Si la olvidas, lo guardado en el servidor no se puede abrir
+  (ni Cloudflare ni nadie). Lo que tengas en tus dispositivos sí se mantiene.
 
 *Detalle técnico:* cifrado AES-256-GCM con una clave derivada de la contraseña (PBKDF2-SHA256, 600 000 iteraciones);
 la clave queda guardada en cada dispositivo de forma que ni la propia app puede extraerla.
 
-**Puesta en marcha (una sola vez, ~10 minutos, gratis)**
+**Usarla:** *Ajustes → Sincronización → Conectar* → escribe tu contraseña. Si es la primera vez, te pide repetirla
+para crear la copia. En cada otro dispositivo, **la misma contraseña**: si no coincide, la app te avisa
+de que no hay datos con esa contraseña (pulsa *Cancelar* y revisa cómo la escribiste).
 
-Google exige que cada app tenga su propio «ID de cliente»:
+Necesita el servidor del apartado 4 con el **`worker.js` actual** (*Edit code* → pegar → *Deploy*).
+La dirección del servidor ya viene puesta en `js/config.js`.
 
-1. Entra en <https://console.cloud.google.com/> → selector de proyectos → **Proyecto nuevo** → «Mi calendario».
-2. **APIs y servicios → Biblioteca** → busca **Google Drive API** → **Habilitar**.
-3. **Google Auth Platform** (o *Pantalla de consentimiento de OAuth*) → **Empezar**:
-   nombre de la app, tu correo, audiencia **Externa** → Crear.
-4. **Audiencia → Usuarios de prueba → Añadir usuarios** → tu Gmail (y el de quien quieras que la use).
-5. **Acceso a los datos → Añadir o quitar permisos** → marca `.../auth/drive.appdata`, `openid` y `email` → Guardar.
-6. **Clientes → Crear cliente** → tipo **Aplicación web** → en **Orígenes de JavaScript autorizados** añade:
-   - `https://TU-USUARIO.github.io`
-   - `http://localhost:8765` (para usarla también en el PC con el `.bat`)
-7. Copia el **ID de cliente** (acaba en `.apps.googleusercontent.com`) y pégalo en **`js/config.js`**
-   antes de subir a GitHub (así sirve para todos tus dispositivos). También se puede pegar en *Ajustes → Sincronización*.
+> Antes la sincronización usaba Google Drive. Ya no hace falta nada de Google Cloud: si la tenías conectada,
+> la app te pedirá conectar de nuevo; usa tu contraseña de cifrado de siempre (o una nueva) en todos los dispositivos.
 
-**Usarla:** *Ajustes → Sincronización → Conectar con Google* → eliges la cuenta → creas la contraseña de cifrado.
-En cada otro dispositivo, lo mismo con **la misma contraseña**.
-
-**Notas**
-
-- Por seguridad, Google da sesiones de 1 hora. Si al abrir la app pone **«☁️ Toca para sincronizar»**,
-  un toque basta (la ventana de Google se abre y se cierra sola).
-- Mientras el proyecto de Google está «en prueba», Google puede pedirte que vuelvas a aceptar los permisos cada pocos días.
-- En iPhone, si el inicio de sesión no vuelve a la app instalada, sincroniza una vez desde Safari.
-
-## 4. Avisos con la app cerrada (Android)
+## 4. Tu servidor (Cloudflare): sincronización y avisos en el navegador
 
 Una app web no puede ejecutarse estando cerrada. Para que los avisos lleguen igualmente, un servidor
 gratuito manda un «toque» (Web Push) al móvil a la hora de cada aviso; el móvil despierta la app un instante,
@@ -126,6 +107,52 @@ Ahorro de batería → Sin restricciones* y activa **Inicio automático**.
 La precisión es de ±1 minuto. Los avisos se programan para los próximos 30 días y la lista se renueva cada vez
 que abres o cierras la app, o cambias algo.
 
+*(Esto es para la versión web. En el móvil Android, mejor la app propia del apartado 5, que no necesita nada de esto.)*
+
+## 5. App de Android (APK)
+
+GitHub fabrica la app sola cada vez que subes cambios y la deja en **Releases**. Enlace fijo de descarga:
+**`https://github.com/TU-USUARIO/TU-REPOSITORIO/releases/latest/download/Calendario.apk`**
+
+**Preparación (una sola vez)**
+
+1. Sube a GitHub todo como siempre, **incluida la carpeta `android-app`**.
+2. **La llave de firma** (para que cada versión nueva se instale encima de la anterior conservando tus datos):
+   en el repositorio → **Settings → Secrets and variables → Actions → New repository secret** →
+   *Name*: **`APK_KEYSTORE`** → *Secret*: pega el contenido de **`llave-apk/APK_KEYSTORE.txt`** → **Add secret**.
+   - ⚠️ La carpeta `llave-apk` **no se sube a GitHub** y conviene guardarla (por ejemplo en un pendrive):
+     si se pierde, las versiones nuevas no se podrán instalar encima (habría que desinstalar y volver a sincronizar).
+3. **El fabricante:** en el repositorio → **Add file → Create new file** → como nombre escribe exactamente
+   **`.github/workflows/apk.yml`** (al escribir las barras se crean las carpetas) → pega el contenido de
+   **`android-app/apk.yml`** → **Commit changes**.
+4. Pestaña **Actions**: verás «App Android (APK)» trabajando (~5 minutos). Cuando salga ✅, el APK está en **Releases**.
+   Si sale ❌, entra, abre el paso en rojo y haz una captura.
+
+**Instalarla en el móvil**
+
+1. En el móvil, abre el enlace de descarga (o *Ajustes → Instalar* en la versión web) → se descarga `Calendario.apk`.
+2. Ábrelo. Android pedirá permitir **instalar apps de esta fuente** (Chrome) → permitir → **Instalar**.
+   Si Play Protect avisa de una app desconocida → *Más detalles* → **Instalar de todas formas**.
+3. Abre la app → acepta el permiso de **notificaciones** → *Ajustes → Sincronización → Conectar* con tu contraseña.
+4. *Ajustes → Avisos → 📲 Alarmas del móvil*: comprueba que todo esté en ✅ y, en Xiaomi, activa
+   **Inicio automático** y **Ahorro de batería → Sin restricciones** (botón *Abrir la ficha de la app*).
+   Pulsa **Probar con la app cerrada**, cierra la app y bloquea el móvil: al minuto debe sonar la alarma.
+5. Si tenías la versión web instalada en el móvil, **desactiva allí los avisos** (*Ajustes → Avisos → Desactivar*)
+   y desinstálala, para no recibir cada aviso dos veces.
+
+**Cómo suenan:** cada nivel tiene su canal de Android (se pueden cambiar en *Sonidos de Android*). 🔕 Visual
+llega en silencio, 📳 solo vibra, 🔔 suena como las notificaciones. ⏰ Alarma suena con el **volumen de alarma**
+(aunque el móvil esté en silencio) durante 3 minutos o hasta que la toques; 🚨 Persistente igual, se queda fija y
+**se repite cada pocos minutos** (hasta 1 hora) hasta que pulses **Parar**. *Posponer 10 min* y *Parar* funcionan
+desde la notificación sin abrir la app. Tras reiniciar el móvil las alarmas se vuelven a programar solas.
+
+**Límites:** el móvil programa los avisos de los próximos 45 días cada vez que abres la app o cambias algo.
+Lo que cambies en **otro** dispositivo llega al móvil cuando abras la app en él (al abrirla se sincroniza).
+
+**Actualizar:** sube los archivos cambiados a GitHub como siempre. En ~5 minutos hay APK nuevo, y la app te avisa
+(«Hay una versión nueva → Descargar»); también en *Ajustes → Versión de la app → Buscar actualización*.
+Se instala encima y **tus datos se conservan**.
+
 ---
 
 ## Usarla solo en el PC
@@ -157,12 +184,17 @@ Doble clic en **`Abrir calendario.bat`** (usa Python). Se abre `http://localhost
 
 ```
 index.html, css/app.css, sw.js, manifest.webmanifest, icons/, .nojekyll
-js/config.js       ID de cliente de Google (para la sincronización)
+js/config.js       dirección de tu servidor (Cloudflare Worker)
 js/app.js          arranque, navegación, atajos, gestos, añadir rápido
 js/store.js        datos, guardado, deshacer y marcas de tiempo para sincronizar
-js/sync.js         cifrado + Google Drive + fusión
-js/push.js         avisos con la app cerrada (sube la lista cifrada al servidor de avisos)
-servidor-avisos/   código del servidor de avisos (Cloudflare Worker); no hace falta subirlo a GitHub
+js/server.js       conexión con tu servidor
+js/sync.js         cifrado + sincronización + fusión
+js/push.js         avisos con la app cerrada en el navegador (sube la lista cifrada al servidor)
+js/native.js       app de Android: alarmas del móvil, botón atrás, versiones nuevas
+android-app/       cómo se fabrica el APK (lo usa GitHub): código nativo de las alarmas (nativo/) y scripts
+android-app/apk.yml  copia del fabricante, para pegarlo en .github/workflows/apk.yml
+llave-apk/         llave de firma del APK: NO subir a GitHub, guardar en sitio seguro
+servidor-avisos/   código del servidor (Cloudflare Worker); no hace falta subirlo a GitHub
 js/engine.js       repeticiones → apariciones, mover / borrar / completar
 js/recurrence.js   reglas de repetición
 js/notify.js       avisos, sonidos y alarmas

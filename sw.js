@@ -1,10 +1,10 @@
 // Service worker: funciona sin conexión y gestiona los botones de las notificaciones.
 // Al publicar una versión nueva, sube el número de VERSION para renovar la caché.
-const VERSION = 'cal-v14';
+const VERSION = 'cal-v16';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/app.js', 'js/util.js', 'js/store.js', 'js/palette.js', 'js/recurrence.js', 'js/engine.js', 'js/notify.js', 'js/ics.js', 'js/quickadd.js',
-  'js/config.js', 'js/sync.js', 'js/push.js',
+  'js/config.js', 'js/server.js', 'js/sync.js', 'js/push.js', 'js/native.js',
   'js/ui/dom.js', 'js/ui/colorpicker.js', 'js/ui/popover.js', 'js/ui/editor.js', 'js/ui/categories.js', 'js/ui/importer.js',
   'js/ui/settings.js', 'js/ui/reminders-ui.js', 'js/ui/catpicker.js', 'js/ui/syncui.js',
   'js/views/shared.js', 'js/views/timegrid.js', 'js/views/month.js', 'js/views/agenda.js', 'js/views/planning.js',
@@ -127,7 +127,15 @@ async function showPending() {
   try {
     const r = await fetch(`${cfg.url}/pending?g=${encodeURIComponent(cfg.group)}`, { cache: 'no-store' });
     entries = (await r.json()).entries ?? [];
-  } catch { /* sin conexión */ }
+  } catch {
+    // Sin conexión con el servidor: avisar igualmente (mejor un aviso genérico que ninguno)
+    if (!visible) {
+      return self.registration.showNotification('🔔 Tienes un aviso de tu calendario', {
+        body: 'Abre la app para verlo.', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'aviso-generico',
+      });
+    }
+    return 0;
+  }
   const shown = (await idbGet('cdt-push', 'kv', 'shown')) ?? {};
   const key = cfg.keySource === 'sync' ? (await idbGet('cdt-sync', 'keys', 'main'))?.key : await idbGet('cdt-push', 'kv', 'key');
   let count = 0;
@@ -165,6 +173,24 @@ async function showPending() {
 }
 
 self.addEventListener('push', (e) => e.waitUntil(showPending()));
+
+// Si el navegador renueva la suscripción por su cuenta, registrar la nueva en el servidor
+self.addEventListener('pushsubscriptionchange', (e) => {
+  e.waitUntil((async () => {
+    const cfg = await idbGet('cdt-push', 'kv', 'cfg');
+    if (!cfg?.url || !cfg.device) return;
+    let sub = e.newSubscription;
+    if (!sub) {
+      const { publicKey } = await (await fetch(`${cfg.url}/vapid`)).json();
+      const raw = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((publicKey.length + 3) % 4)), (c) => c.charCodeAt(0));
+      sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+    }
+    await fetch(`${cfg.url}/subscribe`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group: cfg.group, device: cfg.device, sub: sub.toJSON() }),
+    });
+  })().catch(() => {}));
+});
 // Para comprobar la entrega sin esperar a un toque real (lo usa la prueba de diagnóstico)
 self.addEventListener('message', (e) => {
   if (e.data?.type === 'check-pending') e.waitUntil(showPending().then((n) => e.source?.postMessage({ type: 'pending-shown', count: n })));

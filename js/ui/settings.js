@@ -6,9 +6,48 @@ import { openModal, toast, confirmDialog, ctx } from './dom.js';
 import { remindersHTML, wireReminders } from './reminders-ui.js';
 import { settingsHTML as syncSettingsHTML, wireSettings as wireSyncSettings } from './syncui.js';
 import * as push from '../push.js';
+import * as native from '../native.js';
+
+const when = (t) => new Date(t).toLocaleString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** App de Android: estado de las alarmas del móvil y de los permisos que necesitan */
+function nativeHTML() {
+  const st = native.state() ?? {};
+  const ok = (v) => (v ? '✅' : '❌');
+  const xiaomi = /xiaomi|redmi|poco/i.test(st.fabricante ?? '');
+  return `<div class="push-box" data-native>
+    <div class="field">📲 Alarmas del móvil (suenan con la app cerrada)</div>
+    <p class="small">${st.programados ?? 0} avisos programados (45 días)${st.siguiente ? ` · el siguiente: ${esc(when(st.siguiente))}` : ''}</p>
+    ${st.error ? `<p class="error-box small">${esc(st.error)}</p>` : ''}
+    <div class="diag">
+      <div class="diag-row ${st.notificaciones ? 'ok' : 'bad'}"><span class="diag-i">${ok(st.notificaciones)}</span><div><b>Notificaciones permitidas</b>
+        ${st.notificaciones ? '' : '<div><button type="button" class="btn small primary" data-native-act="perm">Permitir</button></div>'}</div></div>
+      <div class="diag-row ${st.exactas ? 'ok' : 'bad'}"><span class="diag-i">${ok(st.exactas)}</span><div><b>Alarmas a la hora exacta</b>
+        ${st.exactas ? '' : '<div class="small">Sin este permiso, Android puede retrasar los avisos unos minutos.</div><div><button type="button" class="btn small primary" data-native-act="exactas">Permitir «Alarmas y recordatorios»</button></div>'}</div></div>
+      <div class="diag-row ${st.bateria ? 'ok' : 'info'}"><span class="diag-i">${st.bateria ? '✅' : 'ℹ️'}</span><div><b>Sin restricciones de batería</b>
+        ${st.bateria ? '' : '<div class="small">Recomendado: así el ahorro de batería no retrasa ni bloquea las alarmas.</div><div><button type="button" class="btn small" data-native-act="bateria">Quitar restricción</button></div>'}</div></div>
+      ${xiaomi ? `<div class="diag-row info"><span class="diag-i">ℹ️</span><div><b>Xiaomi: activa «Inicio automático»</b>
+        <div class="small">Sin él, tras reiniciar el móvil las alarmas no vuelven hasta que abras la app. En la ficha de la app: <b>Inicio automático</b> → activado, y <b>Ahorro de batería</b> → <b>Sin restricciones</b>.</div>
+        <div><button type="button" class="btn small" data-native-act="app">Abrir la ficha de la app</button></div></div></div>` : ''}
+    </div>
+    <div class="row wrap">
+      <button type="button" class="btn small" data-native-act="test-closed">Probar con la app cerrada (alarma en 1 min)</button>
+      <button type="button" class="btn small" data-native-act="resched">Volver a programar</button>
+      <button type="button" class="btn small" data-native-act="channels">Sonidos de Android</button>
+    </div>
+  </div>`;
+}
+
+/** Enlace al APK (solo en el navegador de un Android, si la app está publicada en GitHub Pages) */
+function apkLink() {
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+  const repo = location.pathname.split('/').filter(Boolean)[0];
+  return m && repo ? `https://github.com/${m[1]}/${repo}/releases/latest/download/Calendario.apk` : null;
+}
 
 /** Avisos con la app cerrada (Web Push con el servidor de avisos) */
 function pushHTML() {
+  if (native.isNative) return nativeHTML();
   const p = push.status();
   if (!p.supported) return '<p class="muted small">Este navegador no admite avisos con la app cerrada.</p>';
   const when = p.lastUpload ? new Date(p.lastUpload).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
@@ -39,13 +78,28 @@ function pushHTML() {
 
 /** Instalar como aplicación (Android/escritorio: botón; iPhone: instrucciones) */
 function installHTML() {
+  if (native.isNative) return '';
+  const apk = apkLink();
+  const apkHTML = apk ? `<p class="small"><b>Android:</b> mejor la app propia (APK), con alarmas de verdad que suenan aunque no haya internet:
+      <a href="${esc(apk)}">descargar Calendario.apk</a>. Si ya la tienes, desinstala esta versión web del móvil para no recibir los avisos dos veces.</p>` : '';
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  if (standalone) return '';
+  if (standalone) return apkHTML && /android/i.test(navigator.userAgent) ? `<fieldset class="box"><legend>📱 App para Android</legend>${apkHTML}</fieldset>` : '';
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   return `<fieldset class="box"><legend>📲 Instalar como aplicación</legend>
+    ${apkHTML}
     ${ctx.canInstall ? '<button type="button" class="btn primary" data-install>Instalar en este dispositivo</button>'
       : ios ? '<p class="small">En Safari: botón <b>Compartir</b> → <b>Añadir a pantalla de inicio</b>.</p>'
-      : '<p class="small">En Chrome (Android): menú <b>⋮</b> → <b>Instalar aplicación</b> o <b>Añadir a pantalla de inicio</b>. Tiene que abrirse desde una dirección <code>https://</code> (por ejemplo GitHub Pages).</p>'}
+      : '<p class="small">Como aplicación web, en Chrome: menú <b>⋮</b> → <b>Instalar aplicación</b> o <b>Añadir a pantalla de inicio</b>. Tiene que abrirse desde una dirección <code>https://</code> (por ejemplo GitHub Pages).</p>'}
+  </fieldset>`;
+}
+
+/** Versión de la app de Android y botón para buscar una nueva */
+function versionHTML() {
+  if (!native.isNative) return '';
+  const b = native.buildInfoSync();
+  return `<fieldset class="box"><legend>📱 Versión de la app</legend>
+    <div class="row wrap center"><span class="small">${b?.build ? `Versión ${b.build}${b.date ? ` (${esc(b.date)})` : ''}` : 'Versión de desarrollo'}</span>
+    <button type="button" class="btn small" data-native-act="update">Buscar actualización</button></div>
   </fieldset>`;
 }
 import { download, esc, fmtDate, fmtTime, parseLocal, readFileText, uid, dateKey } from '../util.js';
@@ -64,8 +118,8 @@ export function openSettings() {
           ${syncSettingsHTML()}
           ${installHTML()}
           <fieldset class="box"><legend>🔔 Avisos</legend>
-            <div class="row wrap center">Notificaciones del sistema: <b>${permTxt}</b>
-              ${perm === 'default' ? '<button class="btn primary small" data-act="perm">Permitir notificaciones</button>' : ''}</div>
+            ${native.isNative ? '' : `<div class="row wrap center">Notificaciones del sistema: <b>${permTxt}</b>
+              ${perm === 'default' ? '<button class="btn primary small" data-act="perm">Permitir notificaciones</button>' : ''}</div>`}
             ${pushHTML()}
             <div class="muted small">Prueba cada intensidad:</div>
             <div class="chips">${Object.entries(LEVELS).map(([k, l]) => `<button class="chipbtn" data-test="${k}">${l.icon} ${l.short}</button>`).join('')}</div>
@@ -89,10 +143,15 @@ export function openSettings() {
             <details><summary>Próximos avisos (72 h): ${next.length}</summary>
               ${next.map((d) => `<div class="small">${fmtDate(new Date(d.at))} ${fmtTime(new Date(d.at))} — ${esc(d.inst.title)} <span class="muted">(${esc(describeReminder(d.r))})</span></div>`).join('') || '<div class="muted small">Ninguno.</div>'}
             </details>
-            <p class="muted small">Con la app abierta, cada nivel suena y vibra como lo has configurado. Con la app cerrada (avisos del
-            servidor), Android usa el sonido y la vibración de las notificaciones de Chrome; las alarmas quedan fijas en pantalla y
-            las persistentes se repiten cada pocos minutos hasta que las pares.</p>
+            ${native.isNative
+              ? `<p class="muted small">Cada nivel tiene su propio sonido en Android («Sonidos de Android» para cambiarlos). Las alarmas suenan con el
+                 volumen de alarma, aunque el móvil esté en silencio: la normal durante 3 minutos y la persistente hasta que pulses «Parar»
+                 (se repite cada pocos minutos). El sonido de alarma y los patrones de vibración de abajo solo se usan en el navegador.</p>`
+              : `<p class="muted small">Con la app abierta, cada nivel suena y vibra como lo has configurado. Con la app cerrada (avisos del
+                 servidor), Android usa el sonido y la vibración de las notificaciones de Chrome; las alarmas quedan fijas en pantalla y
+                 las persistentes se repiten cada pocos minutos hasta que las pares.</p>`}
           </fieldset>
+          ${versionHTML()}
 
           <fieldset class="box"><legend>🎨 Apariencia</legend>
             <div class="row wrap">
@@ -142,6 +201,39 @@ export function openSettings() {
 
       const set = (k, v) => store.quiet((st) => (st.settings[k] = v), true);
       wireSyncSettings(body, render);
+      if (native.isNative) {
+        // Estado real de los permisos (puede haber cambiado en los ajustes de Android)
+        Promise.all([native.refreshState(), native.getBuildInfo()]).then(render);
+        const onVisible = () => {
+          if (!body.isConnected) return document.removeEventListener('visibilitychange', onVisible);
+          if (document.visibilityState === 'visible') native.refreshState().then(render);
+        };
+        document.addEventListener('visibilitychange', onVisible);
+        body.addEventListener('click', async (e) => {
+          const act = e.target.closest('[data-native-act]')?.dataset.nativeAct;
+          if (!act) return;
+          try {
+            if (act === 'perm') await native.requestPermission();
+            else if (act === 'exactas' || act === 'bateria' || act === 'app') await native.openSettings(act);
+            else if (act === 'channels') await native.openSettings('avisos');
+            else if (act === 'resched') {
+              const r = await native.reschedule();
+              toast(r?.error ?? `${r?.programados ?? 0} avisos programados en el móvil`);
+            } else if (act === 'test-closed') {
+              await native.test('alarm', 60);
+              toast('Alarma de prueba dentro de 1 minuto: cierra la app y bloquea el móvil', { timeout: 8000 });
+            } else if (act === 'update') {
+              const u = await native.checkUpdate();
+              if (u) toast(`Hay una versión nueva (v${u.version})`, { actionLabel: 'Descargar', timeout: 30000, action: () => native.openExternal(u.url) });
+              else toast('Ya tienes la última versión');
+            }
+          } catch (err) {
+            toast(err.message ?? String(err), { timeout: 8000 });
+          }
+          await native.refreshState();
+          render();
+        });
+      }
       body.addEventListener('click', async (e) => {
         const act = e.target.closest('[data-push-act]')?.dataset.pushAct;
         if (!act) return;

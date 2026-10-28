@@ -5,6 +5,7 @@ import { occurrenceKeys } from './recurrence.js';
 import { addDays, dateKey, esc, fmtDate, fmtRelative, fmtTime, parseLocal, uid } from './util.js';
 import { toast } from './ui/dom.js';
 import * as push from './push.js';
+import * as native from './native.js';
 
 export const LEVELS = {
   visual: { label: 'Solo visual (silencioso)', short: 'Visual', icon: '🔕' },
@@ -103,6 +104,7 @@ function vibrate(level) {
 // ---------------- Notificación del sistema ----------------
 
 export async function requestPermission() {
+  if (native.isNative) return native.requestPermission();
   if (!('Notification' in window)) return 'unsupported';
   if (Notification.permission === 'default') return Notification.requestPermission();
   return Notification.permission;
@@ -229,7 +231,12 @@ function makeAlarm(inst, reminder) {
 
 export function fire(alarm) {
   const visible = document.visibilityState === 'visible';
-  if (alarm.key) push.markShown(alarm.key); // que el aviso con la app cerrada no lo repita
+  if (alarm.key) {
+    push.markShown(alarm.key); // que el aviso con la app cerrada no lo repita
+    // Decirle al servidor que ya se avisó, para que no mande un toque inútil
+    // (las persistentes no: el servidor debe seguir repitiéndolas si cierras la app sin pararlas)
+    if (alarm.level !== 'persistent') push.ackRemote(alarm.key);
+  }
   store.quiet((s) => {
     s.notif.active = [...(s.notif.active ?? []).filter((a) => a.id !== alarm.id), alarm];
   });
@@ -247,6 +254,7 @@ export function fire(alarm) {
 
 /** Prueba un nivel de aviso */
 export function test(level) {
+  if (native.isNative) return native.test(level);
   unlockAudio();
   fire({
     id: uid(), instId: null, title: `Prueba: ${LEVELS[level].label}`, body: 'Así sonará este aviso',
@@ -343,6 +351,7 @@ export function tick() {
     const fk = alarmKey(d.inst, d.r);
     if (fired[fk]) continue;
     fired[fk] = now;
+    if (native.isNative) continue; // en la app de Android suenan las alarmas del propio móvil
     if (push.shownElsewhere(fk)) continue; // ya llegó con la app cerrada (aviso del servidor)
     const alarm = makeAlarm(d.inst, d.r);
     if (now - d.at > 5 * 60000) missed.push({ ...alarm, at: d.at });

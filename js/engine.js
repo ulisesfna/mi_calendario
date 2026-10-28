@@ -326,7 +326,10 @@ export function applyDone(inst, done) {
   if (!item) return;
   if (inst.kind === 'step') {
     const s = item.steps.find((x) => x.id === inst.step.id);
-    if (s) s.done = done;
+    if (s) {
+      s.done = done;
+      s.doneAt = done ? Date.now() : null;
+    }
   } else if (item.recurrence) setOverride(item, inst.key, { done });
   else item.done = done;
 }
@@ -343,6 +346,43 @@ export function shiftCategory(categoryIds, deltaMin, fromKey = null) {
       shiftSeries(target, deltaMin);
     } else if (!fromKey || item.start.slice(0, 10) >= fromKey) shiftSeries(item, deltaMin);
   }
+}
+
+/** Días que un planning terminado sigue en la pestaña Planning */
+export const PLAN_KEEP_DAYS = 3;
+
+/**
+ * Cuándo acaba un planning (null = no tiene final y se queda siempre en Planning):
+ *  · si todos sus pasos están hechos, cuando se completó el último;
+ *  · si no, lo último de: fecha objetivo, última sesión y último paso con fecha.
+ */
+export function planEnd(item) {
+  const steps = item.steps ?? [];
+  if (steps.length && steps.every((s) => s.done)) {
+    const last = Math.max(...steps.map((s) => s.doneAt ?? 0));
+    if (last) return new Date(last);
+  }
+  let end = null;
+  const later = (d) => {
+    if (d && (!end || d > end)) end = d;
+  };
+  if (item.deadline) later(addDays(parseLocal(item.deadline), 1));
+  for (const s of steps) if (s.date) later(addDays(parseLocal(s.date), 1));
+  if (item.start) {
+    if (!item.recurrence) later(buildInstance(item, null).end);
+    else {
+      const lastKey = lastOccurrence(item.start.slice(0, 10), item.recurrence);
+      if (!lastKey) return null; // se repite sin fin
+      later(buildInstance(item, lastKey).end);
+    }
+  }
+  return end;
+}
+
+/** ¿Terminó hace más de PLAN_KEEP_DAYS días? (sale de la pestaña Planning, no del calendario) */
+export function isPlanArchived(item, now = new Date()) {
+  const end = planEnd(item);
+  return !!end && now - end > PLAN_KEEP_DAYS * 86400e3;
 }
 
 /** Progreso de un planning (pasos completados) */

@@ -3,6 +3,7 @@ import * as store from './store.js';
 import * as engine from './engine.js';
 import * as notify from './notify.js';
 import * as push from './push.js';
+import * as native from './native.js';
 import { ctx, $, toast, chooseScope, openModal, hasModal, closeTopModal, floatingMenu } from './ui/dom.js';
 import { openPopover, closePopover, renderPopover, popoverOpen, popoverId, shiftCurrent, deleteInstance } from './ui/popover.js';
 import { initPopover } from './ui/popover.js';
@@ -540,12 +541,27 @@ function isTyping(e) {
   return t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
 }
 
+/** Cierra lo que esté abierto encima (Escape o botón «atrás» de Android). false si no había nada. */
+function closeTop() {
+  if (document.querySelector('.float-menu')) {
+    document.querySelectorAll('.float-menu').forEach((m) => m.remove());
+    return true;
+  }
+  if (closeTopModal()) return true;
+  if (popoverOpen()) {
+    closePopover();
+    return true;
+  }
+  if (document.body.classList.contains('side-open')) {
+    openSidebar(false);
+    return true;
+  }
+  return false;
+}
+
 function onKey(e) {
   if (e.key === 'Escape') {
-    if (document.querySelector('.float-menu')) return document.querySelectorAll('.float-menu').forEach((m) => m.remove());
-    if (closeTopModal()) return;
-    if (popoverOpen()) return closePopover();
-    openSidebar(false);
+    closeTop();
     return;
   }
   if ((e.ctrlKey || e.metaKey) && !isTyping(e)) {
@@ -718,7 +734,7 @@ setTimeout(() => {
 function renderSync(s) {
   const b = $('#syncBtn');
   b.textContent = statusLine(s);
-  b.classList.toggle('attention', ['needs-auth', 'needs-pass', 'error'].includes(s.state));
+  b.classList.toggle('attention', ['needs-pass', 'error'].includes(s.state) || (s.wasGoogle && !s.enabled));
 }
 initSyncUI({ onChange: renderSync });
 renderSync(syncStatus());
@@ -726,10 +742,10 @@ $('#syncBtn').onclick = () => statusAction(openSettings).then(() => renderSync(s
 setInterval(() => renderSync(syncStatus()), 60000);
 setTimeout(() => {
   const s = syncStatus();
-  if (s.enabled && (s.state === 'needs-auth' || s.state === 'needs-pass')) {
-    toast(s.state === 'needs-pass' ? 'Sincronización: falta la contraseña de cifrado' : 'Sincronización en pausa (la sesión de Google caduca cada hora)', {
-      actionLabel: 'Sincronizar', timeout: 12000, action: () => statusAction(openSettings),
-    });
+  if (s.enabled && s.state === 'needs-pass') {
+    toast('Sincronización: falta la contraseña', { actionLabel: 'Escribirla', timeout: 12000, action: () => statusAction(openSettings) });
+  } else if (s.wasGoogle && !s.enabled) {
+    toast('La sincronización ya no usa Google: vuelve a conectar con tu contraseña', { actionLabel: 'Conectar', timeout: 15000, action: openSettings });
   }
 }, 2000);
 
@@ -740,7 +756,15 @@ setTimeout(() => {
 ctx.promptInstall = () => toast('Menú del navegador ⋮ → «Instalar aplicación» o «Añadir a pantalla de inicio»');
 window.addEventListener('appinstalled', () => toast('¡Aplicación instalada!'));
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+// Pedir almacenamiento persistente: así Android/Chrome no borran los datos ni el service worker
+// para liberar espacio (en apps instaladas se concede sin preguntar)
+navigator.storage?.persist?.().catch(() => {});
+
+// App de Android: alarmas del móvil, botón «atrás» y versiones nuevas
+native.init({ back: closeTop, toast }).catch((e) => console.warn('native', e));
+
+// (en la app de Android no hace falta service worker: los archivos van dentro del APK)
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !native.isNative) {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
 }
 

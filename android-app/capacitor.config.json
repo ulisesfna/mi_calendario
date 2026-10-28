@@ -1,0 +1,11 @@
+{
+  "appId": "io.github.ulisesfna.calendario",
+  "appName": "Mi calendario",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

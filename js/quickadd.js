@@ -104,7 +104,7 @@ export function quickToItem(p, { defaultDuration = 60 } = {}) {
     // Planning sin fecha: una sesión desde la próxima media hora, para que esté en la agenda
     const d = new Date();
     d.setMinutes(Math.ceil((d.getMinutes() + 1) / 30) * 30, 0, 0);
-    return { type: 'plan', title: p.title, start: toLocalISO(d), duration: p.duration ?? defaultDuration, allDay: false, inAgenda: p.inAgenda };
+    return { type: 'plan', title: p.title, start: toLocalISO(d), duration: p.duration ?? defaultDuration, allDay: false, inAgenda: p.inAgenda ?? true };
   }
   if (!hasWhen) return { type: p.type, title: p.title, start: null, inAgenda: p.inAgenda };
   const date = p.date ?? startOfDay(new Date());
@@ -116,7 +116,7 @@ export function quickToItem(p, { defaultDuration = 60 } = {}) {
     duration = (p.endTime[0] * 60 + p.endTime[1]) - (p.time[0] * 60 + p.time[1]);
     if (duration <= 0) duration += 1440;
   }
-  const out = { type: p.type, title: p.title, start: toLocalISO(start), duration, allDay, inAgenda: p.inAgenda };
+  const out = { type: p.type, title: p.title, start: toLocalISO(start), duration, allDay, inAgenda: p.inAgenda ?? (p.type === 'plan' ? true : null) };
   // Tareas sin duración indicada: sin fin (en curso hasta completarlas)
   if (p.type === 'task' && !p.duration && !p.endTime) out.openEnd = true;
   if (p.recurrence) {

@@ -1,20 +1,20 @@
-// Sincronización entre dispositivos a través de Google Drive, con cifrado de extremo a extremo.
+// Sincronización entre dispositivos a través de tu servidor (Cloudflare Worker), con cifrado de extremo a extremo.
 //
-// · Los datos se cifran en el dispositivo (AES-GCM 256) con una clave derivada de tu
-//   contraseña de cifrado (PBKDF2-SHA256, 600 000 iteraciones). Google solo guarda texto cifrado.
-// · El archivo va a la carpeta oculta de la app en Drive («appDataFolder»): no aparece en
-//   «Mi unidad» y la app no tiene acceso a ningún otro archivo tuyo.
+// · Solo hace falta una contraseña de sincronización, la misma en todos tus dispositivos.
+// · De ella se derivan (PBKDF2-SHA256, 600 000 iteraciones) dos cosas distintas:
+//     - un identificador y un código de acceso para el servidor (sin la contraseña no se puede
+//       ni encontrar tu copia ni sobrescribirla), y
+//     - la clave AES-GCM 256 con la que se cifran los datos EN el dispositivo.
+//   El servidor solo guarda texto cifrado: ni Cloudflare ni nadie puede leerlo.
 // · La clave se guarda en este dispositivo como no exportable (IndexedDB); la contraseña no se guarda.
 // · Fusión: gana la versión más reciente de cada categoría/elemento; los borrados también se sincronizan.
 import * as store from './store.js';
-import { GOOGLE_CLIENT_ID } from './config.js';
+import { api, serverUrl } from './server.js';
 
-const FILE_NAME = 'calendario-sync.enc.json';
-const SCOPES = 'https://www.googleapis.com/auth/drive.appdata openid email';
 const ITERATIONS = 600000;
 const CFG_KEY = 'cdt.sync';
-const TOKEN_KEY = 'cdt.sync.token';
 const TOMBSTONE_DAYS = 120;
+const ACCOUNT_SALT = 'calendario-tareas/cuenta/v1';
 
 // ---------------- Estado ----------------
 
@@ -23,8 +23,9 @@ let status = { state: 'off', error: null };
 const statusListeners = new Set();
 let passPrompt = null; // función de la interfaz que pide la contraseña
 let busy = false;
-let pending = false;
+let again = false;
 let pushTimer = null;
+let changeSeq = 0;
 
 function readJSON(k) {
   try {
@@ -44,13 +45,9 @@ function setStatus(state, error = null) {
   statusListeners.forEach((f) => f(getStatus()));
 }
 
-export const clientId = () => cfg.clientId || GOOGLE_CLIENT_ID || '';
-export function setClientId(id) {
-  writeCfg({ clientId: id.trim() });
-  setStatus(cfg.enabled ? status.state : 'off');
-}
 export const getStatus = () => ({
-  ...status, configured: !!clientId(), enabled: !!cfg.enabled, email: cfg.email ?? null, lastSync: cfg.lastSync ?? null, pending,
+  ...status, configured: !!serverUrl(), enabled: !!cfg.enabled, lastSync: cfg.lastSync ?? null, pending: !!cfg.dirty,
+  wasGoogle: !!cfg.wasGoogle, server: serverUrl(),
 });
 export const onStatus = (f) => statusListeners.add(f);
 export const setPassPrompt = (f) => (passPrompt = f);
@@ -68,6 +65,7 @@ const b64big = (buf) => {
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(s);
 };
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 async function deriveKey(passphrase, salt) {
   const base = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
@@ -75,6 +73,16 @@ async function deriveKey(passphrase, salt) {
     { name: 'PBKDF2', salt, iterations: ITERATIONS, hash: 'SHA-256' },
     base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
   );
+}
+
+/** Identificador y código de acceso de tu copia en el servidor (independientes de la clave de cifrado) */
+async function deriveAccount(passphrase) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode(ACCOUNT_SALT), iterations: ITERATIONS, hash: 'SHA-256' }, base, 256,
+  ));
+  const tagged = async (tag) => hex(await crypto.subtle.digest('SHA-256', new Uint8Array([...enc.encode(tag), ...bits])));
+  return { id: (await tagged('id')).slice(0, 32), tok: await tagged('tok') };
 }
 
 async function encryptPayload(obj, key, salt) {
@@ -91,11 +99,12 @@ async function decryptPayload(fileJson, key) {
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(f.iv) }, key, unb64(f.data));
     return JSON.parse(dec.decode(pt));
   } catch {
-    throw new WrongPassphrase('La contraseña de cifrado no coincide');
+    throw new WrongPassphrase('La contraseña de sincronización no coincide');
   }
 }
 
-// Clave guardada en IndexedDB (no exportable: ni siquiera la app puede leer sus bytes)
+// Clave guardada en IndexedDB (no exportable: ni siquiera la app puede leer sus bytes).
+// El service worker la usa también para descifrar los avisos con la app cerrada.
 function idb() {
   return new Promise((res, rej) => {
     const r = indexedDB.open('cdt-sync', 1);
@@ -114,90 +123,15 @@ async function idbOp(mode, fn) {
   });
 }
 const loadKey = () => idbOp('readonly', (s) => s.get('main')).catch(() => null);
-const saveKey = (v) => idbOp('readwrite', (s) => s.put(v, 'main'));
-const clearKey = () => idbOp('readwrite', (s) => s.delete('main')).catch(() => {});
-
-// ---------------- Google: identidad y Drive ----------------
-
-let gisPromise = null;
-function loadGis() {
-  gisPromise ??= new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true;
-    s.onload = () => res(window.google);
-    s.onerror = () => {
-      gisPromise = null;
-      rej(new Error('No se pudo cargar el inicio de sesión de Google (¿sin conexión?)'));
-    };
-    document.head.appendChild(s);
-  });
-  return gisPromise;
-}
-
-function savedToken() {
-  const t = readJSON(TOKEN_KEY);
-  return t && t.exp > Date.now() + 60000 ? t.token : null;
-}
-
-/** Devuelve un token de acceso. Con interactive=false nunca abre ventanas. */
-async function getToken(interactive, { chooseAccount = false } = {}) {
-  const t = chooseAccount ? null : savedToken();
-  if (t) return t;
-  if (!interactive) throw Object.assign(new Error('Hace falta volver a entrar con Google'), { needsAuth: true });
-  if (!clientId()) throw new Error('Falta el ID de cliente de Google (Ajustes → Sincronización)');
-  const google = await loadGis();
-  return new Promise((res, rej) => {
-    const client = google.accounts.oauth2.initTokenClient({
-      client_id: clientId(),
-      scope: SCOPES,
-      callback: (r) => {
-        if (r.error === 'access_denied') {
-          return rej(new Error('Google ha denegado el acceso. Entra con la cuenta que añadiste como «usuario de prueba» en Google Cloud.'));
-        }
-        if (r.error || !r.access_token) return rej(new Error(r.error_description || r.error || 'Acceso no concedido'));
-        localStorage.setItem(TOKEN_KEY, JSON.stringify({ token: r.access_token, exp: Date.now() + (r.expires_in ?? 3600) * 1000 }));
-        res(r.access_token);
-      },
-      error_callback: (e) => rej(new Error(e?.type === 'popup_closed' ? 'Se cerró la ventana de Google' : e?.message || 'No se pudo abrir la ventana de Google')),
-    });
-    // Al conectar, preguntar siempre con qué cuenta (si no, Chrome usa la que tenga por defecto)
-    client.requestAccessToken(chooseAccount ? { prompt: 'select_account' } : { prompt: '', login_hint: cfg.email ?? undefined });
-  });
-}
-
-async function api(token, url, opts = {}) {
-  const r = await fetch(url, { ...opts, headers: { Authorization: `Bearer ${token}`, ...(opts.headers ?? {}) } });
-  if (r.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
-    throw Object.assign(new Error('La sesión de Google ha caducado'), { needsAuth: true });
-  }
-  if (!r.ok) throw new Error(`Google Drive respondió ${r.status}: ${(await r.text()).slice(0, 160)}`);
-  return r;
-}
-
-async function findFile(token) {
-  const q = encodeURIComponent(`name='${FILE_NAME}'`);
-  const r = await api(token, `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,modifiedTime)&orderBy=modifiedTime desc`);
-  return (await r.json()).files?.[0] ?? null;
-}
-const download = async (token, id) => (await api(token, `https://www.googleapis.com/drive/v3/files/${id}?alt=media`)).text();
-
-async function upload(token, id, content) {
-  if (id) {
-    await api(token, `https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: content,
-    });
-    return id;
-  }
-  const boundary = 'cdt' + Math.random().toString(36).slice(2);
-  const meta = { name: FILE_NAME, parents: ['appDataFolder'], mimeType: 'application/json' };
-  const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${boundary}--`;
-  const r = await api(token, 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
-    method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body,
-  });
-  return (await r.json()).id;
-}
+const loadAuth = () => idbOp('readonly', (s) => s.get('auth')).catch(() => null);
+const saveSecrets = (main, auth) => idbOp('readwrite', (s) => {
+  s.put(main, 'main');
+  return s.put(auth, 'auth');
+});
+const clearSecrets = () => idbOp('readwrite', (s) => {
+  s.delete('main');
+  return s.delete('auth');
+}).catch(() => {});
 
 // ---------------- Fusión ----------------
 
@@ -230,131 +164,156 @@ export function merge(local, remote) {
   };
 }
 
-const sameData = (a, b) =>
-  JSON.stringify([a.categories, a.items, a.deleted, a.settings]) === JSON.stringify([b.categories, b.items, b.deleted, b.settings]);
+// Comparación que no depende del orden (cada dispositivo guarda las listas en su propio orden;
+// si contara, dos dispositivos se pasarían el día resubiendo lo mismo)
+function stable(v) {
+  if (Array.isArray(v)) return v.map(stable);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, stable(v[k])]));
+  return v;
+}
+const byId = (list) => [...(list ?? [])].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+const canon = (p) => JSON.stringify(stable({ c: byId(p.categories), i: byId(p.items), d: p.deleted ?? {}, s: p.settings ?? null }));
+const sameData = (a, b) => canon(a) === canon(b);
 
 // ---------------- Flujo principal ----------------
 
-/** Conecta este dispositivo: inicia sesión con Google y pide (o crea) la contraseña de cifrado */
+/** Conecta este dispositivo con la contraseña de sincronización (la misma en todos tus dispositivos) */
 export async function connect() {
-  setStatus('syncing');
+  if (!serverUrl()) throw new Error('Falta la dirección de tu servidor');
+  let adopt = false;
   try {
-    const token = await getToken(true, { chooseAccount: true });
-    const info = await (await api(token, 'https://www.googleapis.com/oauth2/v3/userinfo')).json();
-    writeCfg({ email: info.email ?? null });
-    const file = await findFile(token);
-    let key, salt;
-    if (file) {
-      // Ya hay datos en la nube: hace falta la misma contraseña que en el otro dispositivo
-      const content = await download(token, file.id);
-      salt = unb64(JSON.parse(content).salt);
-      let error = null;
-      for (;;) {
-        const pass = await passPrompt?.({ mode: 'unlock', email: info.email, error });
-        if (!pass) throw new Error('Conexión cancelada');
-        key = await deriveKey(pass, salt);
-        try {
-          await decryptPayload(content, key);
-          break;
-        } catch {
-          error = 'Esa no es la contraseña con la que se cifraron los datos. Prueba otra vez.';
-        }
-      }
-    } else {
-      const pass = await passPrompt?.({ mode: 'create', email: info.email });
+    let error = null;
+    for (;;) {
+      const pass = await passPrompt?.({ mode: 'enter', error });
       if (!pass) throw new Error('Conexión cancelada');
-      salt = crypto.getRandomValues(new Uint8Array(16));
-      key = await deriveKey(pass, salt);
+      setStatus('syncing');
+      const auth = await deriveAccount(pass);
+      const r = await api('/sync/get', { ...auth, since: 0 });
+      let main;
+      if (r.exists) {
+        // Ya hay una copia con esta contraseña (de otro dispositivo): descifrarla para comprobarla
+        const salt = unb64(JSON.parse(r.data).salt);
+        const key = await deriveKey(pass, salt);
+        await decryptPayload(r.data, key);
+        main = { key, salt };
+        // Un dispositivo nuevo (sin nada propio) adopta lo del servidor tal cual, para no
+        // duplicar las categorías de ejemplo que trae la app al instalarse
+        adopt = store.get().items.length === 0;
+      } else {
+        // No hay nada con esta contraseña: puede ser la primera vez… o una errata
+        setStatus(cfg.enabled ? 'idle' : 'off');
+        const repeat = await passPrompt?.({ mode: 'confirm-new' });
+        if (repeat == null) throw new Error('Conexión cancelada');
+        if (repeat !== pass) {
+          error = 'Las dos contraseñas no coinciden. Vuelve a escribirla.';
+          continue;
+        }
+        setStatus('syncing');
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        main = { key: await deriveKey(pass, salt), salt };
+      }
+      await saveSecrets(main, auth);
+      break;
     }
-    await saveKey({ key, salt });
-    writeCfg({ enabled: true });
+    writeCfg({ enabled: true, rev: 0, dirty: true, wasGoogle: false });
     setStatus('idle');
-    // Un dispositivo nuevo (sin nada propio) adopta lo de la nube tal cual, para no
-    // duplicar las categorías de ejemplo que trae la app al instalarse
-    await syncNow({ interactive: true, adopt: !!file && store.get().items.length === 0 });
+    await syncNow({ adopt });
+    if (status.state === 'error') throw new Error(status.error);
   } catch (e) {
     setStatus(cfg.enabled ? 'error' : 'off', e.message);
     throw e;
   }
 }
 
-/** Olvida la cuenta y la clave en este dispositivo (los datos locales y los de Drive se quedan) */
+/** Olvida la contraseña en este dispositivo (los datos locales y los del servidor se quedan) */
 export async function disconnect() {
-  const t = readJSON(TOKEN_KEY)?.token;
-  if (t && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(t, () => {});
-  localStorage.removeItem(TOKEN_KEY);
-  await clearKey();
-  writeCfg({ enabled: false, email: null, lastSync: null });
+  await clearSecrets();
+  writeCfg({ enabled: false, lastSync: null, rev: 0 });
   setStatus('off');
 }
 
-/** Descarga, fusiona y sube. interactive=true puede abrir la ventana de Google si hace falta. */
-export async function syncNow({ interactive = false, adopt = false } = {}) {
+/** Descarga, fusiona y sube lo necesario */
+export async function syncNow({ adopt = false } = {}) {
   if (!cfg.enabled) return;
   if (busy) {
-    pending = true;
+    again = true;
     return;
   }
   busy = true;
-  pending = false;
+  again = false;
   setStatus('syncing');
   try {
-    const stored = await loadKey();
-    if (!stored?.key) throw Object.assign(new Error('Falta la contraseña de cifrado en este dispositivo'), { needsPass: true });
-    const token = await getToken(interactive);
-    const file = await findFile(token);
-    let local = localPayload();
-    if (adopt) local = { categories: [], items: [], deleted: {}, settings: local.settings, settingsUpdatedAt: 0 };
-    let merged = local;
-    let salt = stored.salt;
-    if (file) {
-      const content = await download(token, file.id);
-      const remoteSalt = JSON.parse(content).salt;
-      if (remoteSalt !== b64(stored.salt)) throw new WrongPassphrase('La contraseña de cifrado se cambió en otro dispositivo');
-      const remote = await decryptPayload(content, stored.key);
-      merged = merge(local, remote);
-      if (!sameData(merged, local)) store.applyRemote(merged);
-      if (sameData(merged, remote)) {
-        // Nada nuevo que subir
-        writeCfg({ lastSync: Date.now() });
-        setStatus('idle');
-        return;
+    const [stored, auth] = await Promise.all([loadKey(), loadAuth()]);
+    if (!stored?.key || !auth?.id) throw Object.assign(new Error('Falta la contraseña de sincronización en este dispositivo'), { needsPass: true });
+    for (let attempt = 0; ; attempt++) {
+      const seq = changeSeq;
+      const r = await api('/sync/get', { ...auth, since: adopt ? 0 : cfg.rev ?? 0 });
+      let merged = localPayload();
+      let upload = !r.exists || !!cfg.dirty;
+      if (r.exists && !r.same) {
+        if (JSON.parse(r.data).salt !== b64(stored.salt)) throw new WrongPassphrase('La contraseña de sincronización se cambió en otro dispositivo');
+        const remote = await decryptPayload(r.data, stored.key);
+        const local = adopt ? { categories: [], items: [], deleted: {}, settings: merged.settings, settingsUpdatedAt: 0 } : merged;
+        merged = merge(local, remote);
+        if (!sameData(merged, localPayload())) store.applyRemote(merged);
+        upload = !sameData(merged, remote);
       }
+      if (!upload) {
+        writeCfg({ rev: r.rev, lastSync: Date.now(), ...(seq === changeSeq ? { dirty: false } : {}) });
+        break;
+      }
+      const content = await encryptPayload({ v: 1, savedAt: Date.now(), ...merged }, stored.key, stored.salt);
+      const w = await api('/sync/put', { ...auth, rev: r.exists ? r.rev : 0, data: content }, { allow: [409] });
+      if (w.conflict) {
+        // Otro dispositivo ha subido algo justo ahora: volver a traerlo y fusionar
+        if (attempt >= 3) throw new Error('Otro dispositivo está sincronizando a la vez; se reintentará en unos minutos');
+        adopt = false;
+        continue;
+      }
+      writeCfg({ rev: w.rev, lastSync: Date.now(), ...(seq === changeSeq ? { dirty: false } : {}) });
+      break;
     }
-    const content = await encryptPayload({ v: 1, savedAt: Date.now(), ...merged }, stored.key, salt);
-    await upload(token, file?.id, content);
-    writeCfg({ lastSync: Date.now() });
     setStatus('idle');
   } catch (e) {
-    if (e.needsAuth) setStatus('needs-auth', e.message);
-    else if (e.needsPass || e instanceof WrongPassphrase) setStatus('needs-pass', e.message);
+    if (e.needsPass || e instanceof WrongPassphrase) setStatus('needs-pass', e.message);
     else setStatus('error', e.message);
   } finally {
     busy = false;
-    if (pending) setTimeout(() => syncNow(), 500);
+    if (again) setTimeout(() => syncNow(), 500);
   }
 }
 
 /** Vuelve a pedir la contraseña (p. ej. si se cambió en otro dispositivo) */
 export async function unlockAgain() {
-  await clearKey();
+  await clearSecrets();
   writeCfg({ enabled: false });
   return connect();
 }
 
 export function init() {
-  if (cfg.enabled) setStatus(savedToken() ? 'idle' : 'needs-auth');
+  // Versión anterior (Google Drive): queda desconectada y se avisa para volver a conectar
+  if (cfg.enabled && !cfg.rev && cfg.rev !== 0) {
+    writeCfg({ enabled: false, wasGoogle: true, email: undefined, clientId: undefined });
+    try {
+      localStorage.removeItem('cdt.sync.token');
+    } catch { /* */ }
+  }
+  if (cfg.enabled) setStatus('idle');
   // Subir cambios poco después de hacerlos
   store.onDataChange(() => {
+    changeSeq++;
     if (!cfg.enabled) return;
-    pending = true;
+    if (!cfg.dirty) writeCfg({ dirty: true });
     statusListeners.forEach((f) => f(getStatus()));
     clearTimeout(pushTimer);
-    pushTimer = setTimeout(() => savedToken() && syncNow(), 4000);
+    pushTimer = setTimeout(() => syncNow(), 4000);
   });
   // Traer cambios al abrir, al volver a la app y cada 3 minutos
-  const pull = () => cfg.enabled && savedToken() && document.visibilityState === 'visible' && syncNow();
-  document.addEventListener('visibilitychange', pull);
+  const pull = () => cfg.enabled && document.visibilityState === 'visible' && syncNow();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && cfg.enabled && cfg.dirty) syncNow(); // subir antes de cerrar
+    else pull();
+  });
   setInterval(pull, 3 * 60000);
   setTimeout(pull, 1500);
 }
