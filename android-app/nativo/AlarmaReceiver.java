@@ -40,6 +40,10 @@ public class AlarmaReceiver extends BroadcastReceiver {
             case Alarmas.PARAR:
                 if (a != null) Alarmas.parar(ctx, a);
                 break;
+            case Sonidos.RESTAURAR:
+                // Ya no suena nada: devolver el volumen de alarma que tenía el móvil
+                Sonidos.restaurar(ctx);
+                break;
             default:
                 // Arranque del móvil, app actualizada o permiso de alarmas exactas concedido
                 Alarmas.reprogramar(ctx);

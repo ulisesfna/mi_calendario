@@ -158,41 +158,102 @@ for estilo in ('AppTheme.NoActionBar', 'AppTheme.NoActionBarLaunch'):
             r'\1\n        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>'
             r'\n        <item name="android:statusBarColor">#FF4338CA</item>')
 
-# ---------------- Sonido de alarma (pitidos en dos tonos, Android lo repite) ----------------
+# ---------------- Sonidos (generados aquí; las alarmas Android las repite sin parar) ----------------
+# al_* = alarmas, av_* = avisos con sonido. Los nombres coinciden con Sonidos.ALARMAS / Sonidos.AVISOS.
+
+HZ = 22050
 
 
-def sonido_alarma(ruta, frecuencia=22050):
-    muestras = []
+class Pista:
+    def __init__(self):
+        self.m = []
 
-    def tono(f, seg, vol=0.8):
-        n = int(seg * frecuencia)
-        fundido = int(0.006 * frecuencia)
+    def pitido(self, f, seg, armonicos=(1, 0.3, 0.15)):
+        """Tono sostenido con armónicos impares (se oye mucho más en el altavoz de un móvil que un seno puro)"""
+        n, fundido = int(seg * HZ), int(0.005 * HZ)
         for i in range(n):
+            t = i / HZ
             env = min(1, i / fundido, (n - i) / fundido)
-            t = i / frecuencia
-            # Seno con algo de armónicos: se oye más que un seno puro sin ser estridente
-            v = math.sin(2 * math.pi * f * t) + 0.3 * math.sin(6 * math.pi * f * t) + 0.15 * math.sin(10 * math.pi * f * t)
-            muestras.append(vol * env * v / 1.45)
+            self.m.append(env * sum(a * math.sin(2 * math.pi * f * (2 * k + 1) * t) for k, a in enumerate(armonicos)))
 
-    def silencio(seg):
-        muestras.extend([0.0] * int(seg * frecuencia))
+    def campana(self, f, seg, parciales=((1, 1), (2, 0.5), (2.76, 0.35), (5.4, 0.15)), caida=4.0):
+        """Golpe de campana: varios parciales que se apagan poco a poco"""
+        n, ataque = int(seg * HZ), int(0.004 * HZ)
+        for i in range(n):
+            t = i / HZ
+            env = min(1, i / ataque, (n - i) / ataque) * math.exp(-caida * t / seg * 2)
+            self.m.append(env * sum(a * math.exp(-p * t) * math.sin(2 * math.pi * f * p * t) for p, a in parciales))
 
-    for _ in range(2):
-        for _ in range(4):
-            tono(988, 0.14)
-            silencio(0.04)
-            tono(1319, 0.14)
-            silencio(0.04)
-        silencio(0.5)
-    os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    with wave.open(ruta, 'wb') as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(frecuencia)
-        w.writeframes(b''.join(struct.pack('<h', int(max(-1, min(1, s)) * 32767)) for s in muestras))
+    def barrido(self, f0, f1, seg):
+        """Sirena: frecuencia que sube (o baja) sin saltos"""
+        n, fase = int(seg * HZ), 0.0
+        for i in range(n):
+            f = f0 + (f1 - f0) * i / n
+            fase += 2 * math.pi * f / HZ
+            self.m.append(math.sin(fase) + 0.25 * math.sin(3 * fase))
+
+    def silencio(self, seg):
+        self.m.extend([0.0] * int(seg * HZ))
+
+    def guardar(self, nombre, pico=0.95):
+        # Normalizado: todos los sonidos igual de fuertes (el volumen lo pone el ajuste de la app)
+        mx = max(abs(s) for s in self.m) or 1
+        os.makedirs(os.path.join(RES, 'raw'), exist_ok=True)
+        with wave.open(os.path.join(RES, 'raw', nombre + '.wav'), 'wb') as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(HZ)
+            w.writeframes(b''.join(struct.pack('<h', int(s / mx * pico * 32767)) for s in self.m))
 
 
-sonido_alarma(os.path.join(RES, 'raw', 'alarma.wav'))
+p = Pista()  # Despertador digital: cuatro pitidos agudos y pausa
+for _ in range(2):
+    for _ in range(4):
+        p.pitido(2400, 0.07, (1, 0.45, 0.25))
+        p.silencio(0.06)
+    p.silencio(0.45)
+p.guardar('al_digital')
+
+p = Pista()  # Pitidos en dos tonos
+for _ in range(2):
+    for _ in range(4):
+        p.pitido(988, 0.14)
+        p.silencio(0.04)
+        p.pitido(1319, 0.14)
+        p.silencio(0.04)
+    p.silencio(0.5)
+p.guardar('al_clasica')
+
+p = Pista()  # Sirena
+for _ in range(2):
+    p.barrido(750, 1700, 0.6)
+    p.barrido(1700, 750, 0.6)
+p.guardar('al_sirena')
+
+p = Pista()  # Campanas
+for f in (1568, 1319, 1568, 1319):
+    p.campana(f, 0.6, caida=0.7)
+p.silencio(0.3)
+p.guardar('al_campana')
+
+p = Pista()  # Melodía suave (arpegio)
+for f in (1047, 1319, 1568, 2093):
+    p.campana(f, 0.28, parciales=((1, 1), (2, 0.3)), caida=1.2)
+p.silencio(0.8)
+p.guardar('al_suave')
+
+p = Pista()  # Ding
+p.campana(1568, 0.9, caida=1.2)
+p.guardar('av_ding')
+
+p = Pista()  # Dos notas
+p.campana(1319, 0.3, parciales=((1, 1), (2, 0.4)), caida=1.0)
+p.campana(1760, 0.6, parciales=((1, 1), (2, 0.4)), caida=2.0)
+p.guardar('av_doble')
+
+p = Pista()  # Campanita
+p.campana(2093, 1.2, caida=1.5)
+p.guardar('av_campana')
 
 # ---------------- Versión y Android mínimo ----------------
 

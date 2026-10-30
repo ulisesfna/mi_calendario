@@ -9,8 +9,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.drawable.Icon;
-import android.media.AudioAttributes;
-import android.net.Uri;
 import android.os.Build;
 import android.service.notification.StatusBarNotification;
 import org.json.JSONArray;
@@ -39,15 +37,16 @@ final class Alarmas {
 
     private Alarmas() {}
 
-    static String canal(String nivel) {
+    static String canal(Context ctx, String nivel) {
         switch (nivel) {
             case "visual":
             case "vibrate":
+                return "cal1-" + nivel;
             case "alarm":
             case "persistent":
-                return "cal1-" + nivel;
+                return Sonidos.canal(ctx, nivel);
             default:
-                return "cal1-sound";
+                return Sonidos.canal(ctx, "sound");
         }
     }
 
@@ -59,44 +58,20 @@ final class Alarmas {
     static void crearCanales(Context ctx) {
         if (Build.VERSION.SDK_INT < 26) return;
         NotificationManager nm = ctx.getSystemService(NotificationManager.class);
-        // Las alarmas suenan por el canal de ALARMA: con el volumen de alarma y aunque el móvil esté en silencio
-        AudioAttributes deAlarma = new AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ALARM)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build();
-        Uri sonidoAlarma = Uri.parse("android.resource://" + ctx.getPackageName() + "/raw/alarma");
 
-        NotificationChannel c = new NotificationChannel(canal("visual"), "Avisos silenciosos", NotificationManager.IMPORTANCE_LOW);
+        NotificationChannel c = new NotificationChannel(canal(ctx, "visual"), "Avisos silenciosos", NotificationManager.IMPORTANCE_LOW);
         c.setSound(null, null);
         c.enableVibration(false);
         nm.createNotificationChannel(c);
 
-        c = new NotificationChannel(canal("vibrate"), "Avisos con vibración", NotificationManager.IMPORTANCE_HIGH);
+        c = new NotificationChannel(canal(ctx, "vibrate"), "Avisos con vibración", NotificationManager.IMPORTANCE_HIGH);
         c.setSound(null, null);
         c.enableVibration(true);
         c.setVibrationPattern(new long[] { 0, 200, 100, 200 });
         nm.createNotificationChannel(c);
 
-        c = new NotificationChannel(canal("sound"), "Avisos con sonido", NotificationManager.IMPORTANCE_HIGH);
-        c.enableVibration(true);
-        c.setVibrationPattern(new long[] { 0, 300, 120, 300 });
-        nm.createNotificationChannel(c);
-
-        c = new NotificationChannel(canal("alarm"), "Alarmas", NotificationManager.IMPORTANCE_HIGH);
-        c.setSound(sonidoAlarma, deAlarma);
-        c.enableVibration(true);
-        c.setVibrationPattern(new long[] { 0, 800, 300, 800, 300, 800 });
-        c.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        c.setBypassDnd(true);
-        nm.createNotificationChannel(c);
-
-        c = new NotificationChannel(canal("persistent"), "Alarmas persistentes", NotificationManager.IMPORTANCE_HIGH);
-        c.setSound(sonidoAlarma, deAlarma);
-        c.enableVibration(true);
-        c.setVibrationPattern(new long[] { 0, 1000, 300, 1000, 300, 1000 });
-        c.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        c.setBypassDnd(true);
-        nm.createNotificationChannel(c);
+        // Los que suenan dependen del sonido elegido (ver Sonidos)
+        Sonidos.crearCanales(ctx);
     }
 
     // ---------------- Lista guardada (para volver a programarla tras reiniciar el móvil) ----------------
@@ -218,6 +193,7 @@ final class Alarmas {
     /** Tras reiniciar el móvil o actualizar la app, Android borra las alarmas: volver a ponerlas */
     static void reprogramar(Context ctx) {
         crearCanales(ctx);
+        Sonidos.restaurar(ctx); // por si el móvil se apagó con el volumen de una alarma puesto
         long ahora = System.currentTimeMillis();
         for (String clave : new String[] { "lista", "extra" }) {
             JSONArray l = leerLista(ctx, clave);
@@ -259,7 +235,7 @@ final class Alarmas {
         boolean fuerte = fuerte(nivel);
         boolean persistente = "persistent".equals(nivel);
         String texto = a.optString("texto", "");
-        Notification.Builder b = new Notification.Builder(ctx, alertar ? canal(nivel) : canal("visual"))
+        Notification.Builder b = new Notification.Builder(ctx, alertar ? canal(ctx, nivel) : canal(ctx, "visual"))
             .setSmallIcon(icono(ctx))
             .setColor(COLOR)
             .setContentTitle(a.optString("titulo", "Aviso"))
@@ -277,6 +253,8 @@ final class Alarmas {
         Notification n = b.build();
         // Las alarmas repiten su sonido sin parar hasta que se toca la notificación
         if (fuerte && alertar) n.flags |= Notification.FLAG_INSISTENT;
+        // Volumen propio (ajuste de la app): se sube antes de que empiece a sonar
+        if (alertar) Sonidos.subirVolumen(ctx, Sonidos.volumenDe(ctx, nivel), fuerte ? 3 * MINUTO + 10_000L : 20_000L);
         ctx.getSystemService(NotificationManager.class).notify(id, n);
         if (!alertar) return;
 
@@ -301,6 +279,7 @@ final class Alarmas {
         ctx.getSystemService(NotificationManager.class).cancel(a.optInt("id"));
         am.cancel(pendiente(ctx, REPETIR, a));
         am.cancel(pendiente(ctx, CALLAR, a));
+        Sonidos.restaurar(ctx);
     }
 
     static void pararId(Context ctx, int id) {

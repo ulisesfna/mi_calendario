@@ -38,6 +38,34 @@ function nativeHTML() {
   </div>`;
 }
 
+/** App de Android: sonido y volumen de las alarmas y de los avisos con sonido, y por qué algo podría no sonar */
+function nativeSoundHTML() {
+  const st = native.state() ?? {};
+  const s = st.sonido;
+  if (!s) return '<p class="muted small">Cargando los sonidos…</p>';
+  const options = (map, cur, name) => `${Object.entries(map).map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+    ${cur === 'movil' ? `<option value="movil" selected>📱 ${esc(name || 'Tono del móvil')}</option>` : ''}
+    <option value="pick">📱 Elegir un tono del móvil…</option>`;
+  const problems = native.soundProblems(st);
+  const problemsHTML = (level) => problems.filter((p) => p.level === level).map((p) => `<div class="diag-row bad"><span class="diag-i">⚠️</span><div class="small">${esc(p.text)}
+    ${p.act ? `<div><button type="button" class="btn small" data-native-act="${p.act}">Abrir los ajustes de Android</button></div>` : ''}</div></div>`).join('');
+  const listenBtn = (tipo) => `<button type="button" class="btn self-end" data-ns-listen="${tipo}">${st.escuchando ? '■ Parar' : '▶ Escuchar'}</button>`;
+  const slider = (name, v) => `<label class="field">Volumen: <b data-ns-out="${name}">${v} %</b><input type="range" min="10" max="100" step="5" data-ns="${name}" value="${v}"></label>`;
+  return `<div class="push-box" data-native-sound>
+    <div class="field">⏰ Alarmas y 🚨 alarmas persistentes</div>
+    <div class="row wrap"><label class="field grow">Sonido<select class="input" data-ns="alarma">${options(native.ALARM_SOUNDS, s.alarma, s.alarmaNombre)}</select></label>${listenBtn('alarma')}</div>
+    <label class="check"><input type="checkbox" data-ns="ownAlarm" ${s.volAlarma >= 0 ? 'checked' : ''}> Volumen propio (si no, el volumen de alarma del móvil)</label>
+    ${s.volAlarma >= 0 ? slider('volAlarma', s.volAlarma) : ''}
+    ${problemsHTML('alarm')}
+    <div class="field">🔔 Avisos con sonido</div>
+    <div class="row wrap"><label class="field grow">Sonido<select class="input" data-ns="aviso">${options(native.NOTIF_SOUNDS, s.aviso, s.avisoNombre)}</select></label>${listenBtn('aviso')}</div>
+    <label class="check"><input type="checkbox" data-ns="avisoFuerte" ${s.avisoFuerte ? 'checked' : ''}> Que suenen aunque el móvil esté en silencio o en vibración</label>
+    ${s.avisoFuerte ? slider('volAviso', s.volAviso) : '<div class="muted small">Sin marcar, suenan con el volumen de notificaciones y respetan el modo silencio/vibración del móvil.</div>'}
+    ${problemsHTML('sound')}
+    <p class="muted small">Con volumen propio, la app pone el volumen de alarma del móvil a ese nivel mientras suena y después lo deja como estaba.</p>
+  </div>`;
+}
+
 /** Enlace al APK (solo en el navegador de un Android, si la app está publicada en GitHub Pages) */
 function apkLink() {
   const m = location.hostname.match(/^([^.]+)\.github\.io$/);
@@ -123,7 +151,10 @@ export function openSettings() {
             ${pushHTML()}
             <div class="muted small">Prueba cada intensidad:</div>
             <div class="chips">${Object.entries(LEVELS).map(([k, l]) => `<button class="chipbtn" data-test="${k}">${l.icon} ${l.short}</button>`).join('')}</div>
+            ${native.isNative ? `${nativeSoundHTML()}
             <div class="row wrap">
+              <label class="field">Repetir la persistente cada (min)<input type="number" min="1" max="60" class="input num" name="persistentRepeatMin" value="${s.persistentRepeatMin}"></label>
+            </div>` : `<div class="row wrap">
               <label class="field">Sonido de alarma<select class="input" name="alarmSound">${Object.entries(SOUNDS).map(([k, l]) => `<option value="${k}" ${s.alarmSound === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
               <button class="btn self-end" data-act="play">▶ Escuchar</button>
               <label class="field">Volumen<input type="range" min="0" max="1" step="0.05" name="alarmVolume" value="${s.alarmVolume}"></label>
@@ -131,7 +162,7 @@ export function openSettings() {
             </div>
             <details><summary>Patrones de vibración (ms vibrando, pausa, vibrando…)</summary>
               ${['vibrate', 'sound', 'alarm', 'persistent'].map((k) => `<label class="field">${LEVELS[k].icon} ${LEVELS[k].short}<input class="input" data-vib="${k}" value="${(s.vibration[k] ?? []).join(', ')}"></label>`).join('')}
-            </details>
+            </details>`}
             <div class="field">Avisos por defecto (para categorías sin avisos propios)</div>
             <div data-defrem>${remindersHTML(s.defaultReminders)}</div>
             <div class="field">✅ Avisos de las tareas (por defecto, a la hora en que empiezan)</div>
@@ -144,9 +175,8 @@ export function openSettings() {
               ${next.map((d) => `<div class="small">${fmtDate(new Date(d.at))} ${fmtTime(new Date(d.at))} — ${esc(d.inst.title)} <span class="muted">(${esc(describeReminder(d.r))})</span></div>`).join('') || '<div class="muted small">Ninguno.</div>'}
             </details>
             ${native.isNative
-              ? `<p class="muted small">Cada nivel tiene su propio sonido en Android («Sonidos de Android» para cambiarlos). Las alarmas suenan con el
-                 volumen de alarma, aunque el móvil esté en silencio: la normal durante 3 minutos y la persistente hasta que pulses «Parar»
-                 (se repite cada pocos minutos). El sonido de alarma y los patrones de vibración de abajo solo se usan en el navegador.</p>`
+              ? `<p class="muted small">Las alarmas suenan aunque el móvil esté en silencio: la normal durante 3 minutos y la persistente
+                 hasta que pulses «Parar» (se repite cada pocos minutos). Los avisos 🔔 suenan una vez y 📳 solo vibran.</p>`
               : `<p class="muted small">Con la app abierta, cada nivel suena y vibra como lo has configurado. Con la app cerrada (avisos del
                  servidor), Android usa el sonido y la vibración de las notificaciones de Chrome; las alarmas quedan fijas en pantalla y
                  las persistentes se repiten cada pocos minutos hasta que las pares.</p>`}
@@ -233,6 +263,42 @@ export function openSettings() {
           await native.refreshState();
           render();
         });
+        // Sonido y volumen (se guardan en el móvil, no se sincronizan: cada dispositivo tiene su altavoz)
+        body.addEventListener('change', async (e) => {
+          const t = e.target.closest('[data-ns]');
+          if (!t) return;
+          const k = t.dataset.ns;
+          try {
+            if ((k === 'alarma' || k === 'aviso') && t.value === 'pick') await native.pickTone(k);
+            else if (k === 'alarma' || k === 'aviso') await native.configureSound({ [k]: t.value });
+            else if (k === 'ownAlarm') await native.configureSound({ volAlarma: t.checked ? 80 : -1 });
+            else if (k === 'avisoFuerte') await native.configureSound({ avisoFuerte: t.checked });
+            else await native.configureSound({ [k]: Math.round(+t.value) });
+          } catch (err) {
+            toast(err.message ?? String(err), { timeout: 8000 });
+          }
+          render();
+        });
+        body.addEventListener('input', (e) => {
+          const t = e.target.closest('input[type=range][data-ns]');
+          const out = t && body.querySelector(`[data-ns-out="${t.dataset.ns}"]`);
+          if (out) out.textContent = `${t.value} %`;
+        });
+        let listenTimer = null;
+        body.addEventListener('click', async (e) => {
+          const b = e.target.closest('[data-ns-listen]');
+          if (!b) return;
+          try {
+            await native.listen(b.dataset.nsListen);
+          } catch (err) {
+            toast(err.message ?? String(err), { timeout: 8000 });
+          }
+          await native.refreshState();
+          render();
+          // Al acabar la muestra, el botón vuelve a «Escuchar»
+          clearTimeout(listenTimer);
+          listenTimer = setTimeout(() => body.isConnected && native.refreshState().then(render), 6500);
+        });
       }
       body.addEventListener('click', async (e) => {
         const act = e.target.closest('[data-push-act]')?.dataset.pushAct;
@@ -281,7 +347,7 @@ export function openSettings() {
 
       body.addEventListener('change', async (e) => {
         const t = e.target;
-        if (t.closest('[data-sync]') || t.closest('[data-push]')) return;
+        if (t.closest('[data-sync]') || t.closest('[data-push]') || t.closest('[data-native-sound]')) return;
         if (t.dataset.vib) {
           const pat = t.value.split(/[\s,;]+/).map(Number).filter((n) => n >= 0 && Number.isFinite(n));
           store.quiet((st) => (st.settings.vibration[t.dataset.vib] = pat));

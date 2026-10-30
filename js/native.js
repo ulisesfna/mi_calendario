@@ -96,6 +96,54 @@ export function test(level, seconds = 0) {
   });
 }
 
+// ---------------- Sonido y volumen ----------------
+
+export const ALARM_SOUNDS = { digital: 'Despertador digital', clasica: 'Pitidos en dos tonos', sirena: 'Sirena', campana: 'Campanas', suave: 'Melodía suave', sistema: 'La alarma del móvil' };
+export const NOTIF_SOUNDS = { ding: 'Ding', doble: 'Dos notas', campana: 'Campanita', sistema: 'El sonido de notificación del móvil' };
+
+/** Cambia sonido/volumen ({ alarma, aviso, volAlarma, volAviso, avisoFuerte }); devuelve el estado nuevo */
+export async function configureSound(cfg) {
+  lastState = { ...(lastState ?? {}), ...(await Alarmas.configurarSonido(cfg)) };
+  return lastState;
+}
+
+/** Escucha el sonido elegido ('alarma' | 'aviso'); si ya sonaba, lo para. Devuelve true si está sonando. */
+export async function listen(tipo) {
+  return (await Alarmas.escuchar({ tipo }))?.sonando ?? false;
+}
+
+/** Selector de tonos de Android ('alarma' | 'aviso') */
+export async function pickTone(tipo) {
+  lastState = { ...(lastState ?? {}), ...(await Alarmas.elegirTono({ tipo })) };
+  return lastState;
+}
+
+/**
+ * Por qué podría no sonar un aviso: lista de { level: 'sound' | 'alarm', text, act? } a partir del estado del móvil
+ * (modo silencio/vibración, volúmenes, No molestar y canales a los que se les ha quitado el sonido)
+ */
+export function soundProblems(st = lastState) {
+  if (!st?.sonido) return [];
+  const out = [];
+  const s = st.sonido;
+  const ch = st.canales ?? {};
+  const off = (c) => c && c.existe && (c.importancia === 0 || !c.sonido);
+  if (off(ch.sound)) out.push({ level: 'sound', text: 'En los ajustes de Android, el canal «Avisos con sonido» está sin sonido o desactivado.', act: 'channels' });
+  if (off(ch.alarm) || off(ch.persistent)) out.push({ level: 'alarm', text: 'En los ajustes de Android, el canal «Alarmas» o «Alarmas persistentes» está sin sonido o desactivado.', act: 'channels' });
+  if (!s.avisoFuerte) {
+    if (st.modo === 'vibracion' || st.modo === 'silencio') {
+      out.push({ level: 'sound', text: `Tu móvil está en modo ${st.modo === 'vibracion' ? 'vibración' : 'silencio'}: los avisos 🔔 solo vibran. Si quieres que suenen igualmente, marca «Que suenen aunque el móvil esté en silencio».` });
+    } else if (st.volNotif === 0) {
+      out.push({ level: 'sound', text: 'El volumen de notificaciones del móvil está a 0: los avisos 🔔 no se oyen.' });
+    }
+    if (st.noMolestar) out.push({ level: 'sound', text: '«No molestar» está activado: los avisos 🔔 no suenan (las alarmas sí, si «No molestar» deja pasar las alarmas).' });
+  }
+  if (s.volAlarma < 0 && st.maxAlarma && st.volAlarmaMovil / st.maxAlarma < 0.35) {
+    out.push({ level: 'alarm', text: `El volumen de alarma del móvil está bajo (${st.volAlarmaMovil}/${st.maxAlarma}). Pon un volumen propio para las alarmas.` });
+  }
+  return out;
+}
+
 // ---------------- Versiones nuevas (GitHub) ----------------
 
 let buildInfo = null;

@@ -140,11 +140,13 @@ GitHub fabrica la app sola cada vez que subes cambios y la deja en **Releases**.
 5. Si tenías la versión web instalada en el móvil, **desactiva allí los avisos** (*Ajustes → Avisos → Desactivar*)
    y desinstálala, para no recibir cada aviso dos veces.
 
-**Cómo suenan:** cada nivel tiene su canal de Android (se pueden cambiar en *Sonidos de Android*). 🔕 Visual
-llega en silencio, 📳 solo vibra, 🔔 suena como las notificaciones. ⏰ Alarma suena con el **volumen de alarma**
-(aunque el móvil esté en silencio) durante 3 minutos o hasta que la toques; 🚨 Persistente igual, se queda fija y
+**Cómo suenan:** 🔕 Visual llega en silencio, 📳 solo vibra, 🔔 suena una vez (con el volumen de notificaciones,
+así que en modo vibración solo vibra, salvo que marques *Que suenen aunque el móvil esté en silencio*).
+⏰ Alarma suena (aunque el móvil esté en silencio) durante 3 minutos o hasta que la toques; 🚨 Persistente igual, se queda fija y
 **se repite cada pocos minutos** (hasta 1 hora) hasta que pulses **Parar**. *Posponer 10 min* y *Parar* funcionan
 desde la notificación sin abrir la app. Tras reiniciar el móvil las alarmas se vuelven a programar solas.
+El sonido y el volumen se eligen en *Ajustes → Avisos* (sonidos propios, la alarma del móvil o cualquier tono suyo).
+Con **volumen propio**, la app pone el volumen de alarma del móvil a ese nivel mientras suena y luego lo deja como estaba.
 
 **Límites:** el móvil programa los avisos de los próximos 45 días cada vez que abres la app o cambias algo.
 Lo que cambies en **otro** dispositivo llega al móvil cuando abras la app en él (al abrirla se sincroniza).
