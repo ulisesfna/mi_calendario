@@ -22,9 +22,15 @@ export function parseQuick(input, now = new Date()) {
     });
   };
 
-  take(/^\s*(tarea|task|t)\s*:\s*/i, () => (res.type = 'task'));
-  take(/^\s*(planning|plan|p)\s*:\s*/i, () => (res.type = 'plan'));
-  take(/^\s*(evento|e)\s*:\s*/i, () => (res.type = 'event'));
+  let typed = false;
+  take(/^\s*(tarea|task|t)\s*:\s*/i, () => (typed = res.type = 'task'));
+  take(/^\s*(planning|plan|p)\s*:\s*/i, () => (typed = res.type = 'plan'));
+  take(/^\s*(evento|e)\s*:\s*/i, () => (typed = res.type = 'event'));
+  // Prioridad: «!!» media, «!!!» alta (implica que es una tarea, salvo que se diga otra cosa)
+  take(/\s(!{2,3})(?=\s)/, (_, b) => {
+    res.priority = b.length === 3 ? 3 : 2;
+    if (!typed) res.type = 'task';
+  });
   take(/\s#([^\s#!~]+)/, (_, c) => (res.categoryName = c.replace(/_/g, ' ')));
   take(/\s!([a-záéíóúñ]+)(?:-(\d+)\s*(m|min|h|d)?)?(?=\s)/i, (_, w, n, u) => {
     const level = LEVEL_WORDS[norm(w)] ?? 'sound';
@@ -98,7 +104,13 @@ export function parseQuick(input, now = new Date()) {
 }
 
 /** Convierte el resultado del análisis en campos de ítem */
-export function quickToItem(p, { defaultDuration = 60 } = {}) {
+export function quickToItem(p, opts = {}) {
+  const out = quickFields(p, opts);
+  if (p.priority && out.type === 'task') out.priority = p.priority;
+  return out;
+}
+
+function quickFields(p, { defaultDuration = 60 } = {}) {
   const hasWhen = p.date || p.time || p.recurrence;
   if (!hasWhen && p.type === 'plan') {
     // Planning sin fecha: una sesión desde la próxima media hora, para que esté en la agenda
@@ -144,6 +156,7 @@ export function quickToItem(p, { defaultDuration = 60 } = {}) {
 export function quickSummary(p) {
   const bits = [];
   bits.push({ event: '📅 Evento', task: '✅ Tarea', plan: '🗺️ Planning' }[p.type]);
+  if (p.priority && p.type === 'task') bits.push(p.priority === 3 ? '▲ prioridad alta' : '◆ prioridad media');
   if (p.date) bits.push(`${p.date.getDate()}/${p.date.getMonth() + 1}`);
   if (p.time) bits.push(`${pad(p.time[0])}:${pad(p.time[1])}${p.endTime ? `–${pad(p.endTime[0])}:${pad(p.endTime[1])}` : ''}`);
   if (p.duration) bits.push(`${p.duration} min`);

@@ -1,6 +1,6 @@
 // Service worker: funciona sin conexión y gestiona los botones de las notificaciones.
 // Al publicar una versión nueva, sube el número de VERSION para renovar la caché.
-const VERSION = 'cal-v17';
+const VERSION = 'cal-v19';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/app.js', 'js/util.js', 'js/store.js', 'js/palette.js', 'js/recurrence.js', 'js/engine.js', 'js/notify.js', 'js/ics.js', 'js/quickadd.js',
@@ -52,7 +52,7 @@ self.addEventListener('notificationclick', (e) => {
     if (data.push) await remote(e.action === 'snooze' ? '/snooze' : '/ack', { k: data.k, minutes: 10 });
     const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     list.forEach((c) => c.postMessage(msg));
-    if (e.action === 'snooze') return;
+    if (e.action === 'snooze' || e.action === 'done') return;
     const c = list[0];
     if (c) return c.focus();
     return self.clients.openWindow('./');

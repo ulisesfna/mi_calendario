@@ -9,11 +9,14 @@ import { addDays, diffDays, esc, fmtTime, parseLocal, rgba, textOn } from '../ut
  * mode: 'full' (hora + título) | 'short' (solo título) | 'color' (solo la barra de color).
  * Lo que está fuera de la agenda se muestra siempre solo con color, atenuado.
  */
-/** Marca de las tareas: ⚠ vencida y sin hacer, ∞ sin fin (en curso) */
+/** Marca de las tareas: ▲/◆ prioridad alta/media, ⚠ vencida y sin hacer, ∞ sin fin (en curso) */
 function taskMark(inst) {
-  if (inst.rolled) return inst.pending === 'overdue' ? '⚠ ' : '∞ ';
-  return inst.openEnd ? '∞ ' : '';
+  const p = inst.kind === 'item' ? store.priorityOf(inst.item) : 0;
+  const prio = p >= 2 ? `<b class="prio p${p}" title="Prioridad ${store.PRIORITY[p].label.toLowerCase()}">${store.PRIORITY[p].icon}</b> ` : '';
+  if (inst.rolled) return prio + (inst.pending === 'overdue' ? '⚠ ' : '∞ ');
+  return prio + (inst.openEnd ? '∞ ' : '');
 }
+export const prioMark = (inst) => taskMark({ ...inst, rolled: false, openEnd: false });
 const rolledTip = (inst) =>
   inst.rolled ? ` — ${inst.pending === 'overdue' ? 'sin completar, venció el' : 'en curso desde el'} ${inst.start.getDate()}/${inst.start.getMonth() + 1}` : '';
 

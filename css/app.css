@@ -312,6 +312,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .chip-time { color: var(--muted); font-size: 11px; flex: none; }
 .chip.solid .chip-time { color: inherit; opacity: .8; }
 .chip-t { overflow: hidden; text-overflow: ellipsis; }
+/* Prioridad de las tareas: ▲ alta, ◆ media (sobre fondo de color, del mismo color que el texto) */
+.prio { font-weight: 800; }
+.prio.p3 { color: var(--danger); }
+.prio.p2 { color: var(--warn); }
+.chip.solid .prio, .chip.block .prio { color: inherit; }
 .chip-check { width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 50%; display: inline-grid; place-items: center; font-size: 9px; flex: none; cursor: pointer; }
 .chip.timed .chip-check { border-color: var(--c); color: var(--c); }
 .chip.done { opacity: .55; }

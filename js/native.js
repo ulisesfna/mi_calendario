@@ -1,7 +1,7 @@
 // App de Android (APK): alarmas del propio móvil, botón «atrás» y aviso de versiones nuevas.
 // En el navegador (PWA) no hace nada: `isNative` es false.
 import * as store from './store.js';
-import { alarmKey, alarmText, dueBetween, LEVELS } from './notify.js';
+import { alarmKey, alarmText, completeTask, dueBetween, LEVELS } from './notify.js';
 
 const Cap = window.Capacitor;
 export const isNative = !!Cap?.isNativePlatform?.() && typeof Cap.registerPlugin === 'function';
@@ -39,15 +39,34 @@ export function buildAlarms(now = Date.now()) {
     if (seen.has(id)) continue;
     seen.add(id);
     const { title, body } = alarmText(d.inst, d.r, d.at);
-    out.push({ id, at: d.at, titulo: title, texto: body, nivel: d.r.level || 'sound', clave: key, repetirMin: rep });
+    out.push({
+      id, at: d.at, titulo: title, texto: body, nivel: d.r.level || 'sound', clave: key, repetirMin: rep,
+      // Las tareas llevan el botón «✔ Hecha» (inst = la aparición concreta que se completa)
+      ...(d.inst.item.type === 'task' ? { tarea: true, inst: d.inst.id } : {}),
+    });
     if (out.length >= MAX_ALARMS) break;
   }
   return out;
 }
 
+/**
+ * Tareas marcadas como hechas desde la notificación (con la app cerrada o abierta): se apuntan aquí.
+ * Va antes de programar, para no volver a programar avisos de tareas que ya están hechas.
+ */
+let toastFn = () => {};
+async function collectDone() {
+  let list = [];
+  try {
+    list = (await Alarmas.hechas())?.hechas ?? [];
+  } catch { /* */ }
+  const titles = list.map((id) => completeTask(id)).filter(Boolean);
+  if (titles.length) toastFn(titles.length === 1 ? `✔ «${titles[0]}» marcada como hecha desde el aviso` : `✔ ${titles.length} tareas marcadas como hechas desde los avisos`, { timeout: 6000 });
+}
+
 export async function reschedule() {
   if (!isNative) return;
   clearTimeout(timer);
+  await collectDone();
   try {
     lastState = { ...(await Alarmas.programar({ avisos: buildAlarms() })), at: Date.now(), error: null };
   } catch (e) {
@@ -183,7 +202,10 @@ export function openExternal(url) {
  */
 export async function init({ back, toast }) {
   if (!isNative) return;
+  toastFn = toast;
   document.documentElement.classList.add('native');
+  // «✔ Hecha» pulsado con la app abierta: apuntarlo ya
+  Alarmas.addListener?.('hechas', () => scheduleSoon(300));
   // Programar al abrir, tras cada cambio (también los que llegan sincronizados) y al volver a la app
   store.onDataChange(() => scheduleSoon());
   store.subscribe((info) => info?.label === 'sync' && scheduleSoon());

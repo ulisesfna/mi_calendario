@@ -477,6 +477,7 @@ function openHelp() {
           <li><code>plan: preparar parcial #Química</code></li>
           <li><code>Gimnasio cada lunes y miércoles 19-20:30 #Salud !vibra</code></li>
           <li><code>Idea de viaje ~</code> (el <code>~</code> lo guarda fuera de la agenda)</li>
+          <li><code>Pagar matrícula viernes 10:00 !!!</code> (tarea de prioridad alta; <code>!!</code> = media)</li>
         </ul>
         <p class="muted small">Niveles de aviso: <code>!silencio</code> <code>!vibra</code> <code>!sonido</code> <code>!alarma</code> <code>!persistente</code>, con antelación opcional: <code>-10m</code>, <code>-2h</code>, <code>-1d</code>.</p>
         <h3>Ratón y dedo</h3>

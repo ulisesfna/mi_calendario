@@ -29,6 +29,7 @@ final class Alarmas {
     static final String PARAR = "io.github.ulisesfna.calendario.PARAR";
     static final String REPETIR = "io.github.ulisesfna.calendario.REPETIR";
     static final String CALLAR = "io.github.ulisesfna.calendario.CALLAR";
+    static final String HECHA = "io.github.ulisesfna.calendario.HECHA";
 
     private static final String PREFS = "alarmas";
     private static final int COLOR = 0xFF5B4BDB;
@@ -247,8 +248,12 @@ final class Alarmas {
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setContentIntent(abrirApp(ctx, id))
             .setAutoCancel(!persistente)
-            .setOngoing(persistente && alertar)
-            .addAction(new Notification.Action.Builder((Icon) null, "Posponer 10 min", pendiente(ctx, POSPONER, a)).build())
+            .setOngoing(persistente && alertar);
+        // Las tareas se pueden dar por hechas desde la propia notificación
+        if (a.optBoolean("tarea") && !a.optString("inst").isEmpty()) {
+            b.addAction(new Notification.Action.Builder((Icon) null, "✔ Hecha", pendiente(ctx, HECHA, a)).build());
+        }
+        b.addAction(new Notification.Action.Builder((Icon) null, "Posponer 10 min", pendiente(ctx, POSPONER, a)).build())
             .addAction(new Notification.Action.Builder((Icon) null, fuerte ? "Parar" : "Vale", pendiente(ctx, PARAR, a)).build());
         Notification n = b.build();
         // Las alarmas repiten su sonido sin parar hasta que se toca la notificación
@@ -288,6 +293,45 @@ final class Alarmas {
             a.put("id", id);
         } catch (JSONException ignored) {}
         parar(ctx, a);
+    }
+
+    /**
+     * «✔ Hecha»: quita el aviso, cancela los demás avisos de esa misma tarea y lo apunta para que
+     * la app la marque como hecha la próxima vez que se abra (o ya mismo, si está abierta).
+     */
+    static void hecha(Context ctx, JSONObject a) {
+        parar(ctx, a);
+        String inst = a.optString("inst");
+        if (inst.isEmpty()) return;
+        AlarmManager am = ctx.getSystemService(AlarmManager.class);
+        for (String clave : new String[] { "lista", "extra" }) {
+            JSONArray l = leerLista(ctx, clave);
+            JSONArray quedan = new JSONArray();
+            for (int i = 0; i < l.length(); i++) {
+                JSONObject x = l.optJSONObject(i);
+                if (x == null) continue;
+                if (inst.equals(x.optString("inst"))) {
+                    am.cancel(pendiente(ctx, DISPARAR, x));
+                    parar(ctx, x);
+                } else {
+                    quedan.put(x);
+                }
+            }
+            guardarLista(ctx, clave, quedan);
+        }
+        JSONArray hechas = leerLista(ctx, "hechas");
+        for (int i = 0; i < hechas.length(); i++) {
+            if (inst.equals(hechas.optString(i))) return;
+        }
+        hechas.put(inst);
+        guardarLista(ctx, "hechas", hechas);
+    }
+
+    /** Devuelve (y olvida) las tareas marcadas como hechas desde las notificaciones */
+    static JSONArray sacarHechas(Context ctx) {
+        JSONArray l = leerLista(ctx, "hechas");
+        guardarLista(ctx, "hechas", new JSONArray());
+        return l;
     }
 
     static void posponer(Context ctx, JSONObject a, int minutos) {

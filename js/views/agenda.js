@@ -2,6 +2,7 @@
 import * as store from '../store.js';
 import { instancesInRange, pendingTasks } from '../engine.js';
 import { ctx } from '../ui/dom.js';
+import { prioMark } from './shared.js';
 import { addDays, dateKey, DAY_LONG, esc, fmtTime, MONTHS, sameDay, startOfDay } from '../util.js';
 
 const shortDate = (d) => `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
@@ -32,7 +33,7 @@ function rowHTML(inst, { pending = false } = {}) {
     <div class="ag-time">${time}</div>
     <div class="ag-bar"></div>
     <div class="ag-main">
-      <div class="ag-title">${checkable ? `<span class="chip-check" data-check="${inst.id}">${inst.done ? '✔' : ''}</span>` : ''}${inst.icon ? inst.icon + ' ' : ''}${esc(inst.title)}</div>
+      <div class="ag-title">${checkable ? `<span class="chip-check" data-check="${inst.id}">${inst.done ? '✔' : ''}</span>` : ''}${prioMark(inst)}${inst.icon ? inst.icon + ' ' : ''}${esc(inst.title)}</div>
       ${meta ? `<div class="ag-meta">${meta}</div>` : ''}
     </div>
     ${pending ? `<div class="ag-move">

@@ -40,6 +40,12 @@ public class AlarmaReceiver extends BroadcastReceiver {
             case Alarmas.PARAR:
                 if (a != null) Alarmas.parar(ctx, a);
                 break;
+            case Alarmas.HECHA:
+                if (a != null) {
+                    Alarmas.hecha(ctx, a);
+                    AlarmasPlugin.avisarHechas(); // si la app está abierta, que lo apunte ya
+                }
+                break;
             case Sonidos.RESTAURAR:
                 // Ya no suena nada: devolver el volumen de alarma que tenía el móvil
                 Sonidos.restaurar(ctx);

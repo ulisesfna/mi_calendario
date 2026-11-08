@@ -275,9 +275,19 @@ export function itemIcon(item) {
   return getCategory(item.categoryId)?.icon ?? '';
 }
 
-/** ¿Entra en la agenda? El ítem manda; si no lo indica hereda de su categoría */
+/** Prioridad de las tareas (0 ninguna · 1 baja · 2 media · 3 alta) */
+export const PRIORITY = [
+  { label: 'Ninguna', icon: '–' },
+  { label: 'Baja', icon: '▽' },
+  { label: 'Media', icon: '◆' },
+  { label: 'Alta', icon: '▲' },
+];
+export const priorityOf = (item) => (item?.type === 'task' ? item.priority | 0 : 0);
+
+/** ¿Entra en la agenda? El ítem manda; si no lo indica, los exámenes entran siempre y el resto hereda de su categoría */
 export function inAgenda(item) {
   if (item.inAgenda === true || item.inAgenda === false) return item.inAgenda;
+  if (item.exam) return true;
   for (const c of categoryChain(item.categoryId)) {
     if (c.inAgenda === false) return false;
   }
@@ -285,8 +295,9 @@ export function inAgenda(item) {
 }
 
 export function effectiveReminders(item) {
+  // Exámenes: los avisos de todos los exámenes + los propios de este (item.reminders = avisos extra)
+  if (item.exam) return [...(state.settings.examReminders ?? []), ...(Array.isArray(item.reminders) ? item.reminders : [])];
   if (Array.isArray(item.reminders)) return item.reminders;
-  if (item.exam) return state.settings.examReminders ?? [];
   if (item.type === 'task') return state.settings.taskReminders ?? [];
   if (item.type === 'plan') return state.settings.planReminders ?? [];
   for (const c of categoryChain(item.categoryId)) {

@@ -106,9 +106,12 @@ export function instancesInRange(from, to, opts = {}) {
       out.push(deadlineInstance(item));
     }
   }
-  out.sort((a, b) => a.start - b.start || (b.allDay - a.allDay) || (b.end - b.start) - (a.end - a.start));
+  // A la misma hora (p. ej. tareas de todo el día), primero las de más prioridad
+  out.sort((a, b) => a.start - b.start || (b.allDay - a.allDay) || prio(b) - prio(a) || (b.end - b.start) - (a.end - a.start));
   return out;
 }
+
+const prio = (inst) => (inst.kind === 'item' ? store.priorityOf(inst.item) : 0);
 
 /**
  * Tareas sin completar cuyo momento ya pasó:
@@ -134,7 +137,8 @@ export function pendingTasks(now = new Date(), { visibleOnly = false, agendaOnly
       else if (inst.openEnd && inst.start <= now) out.push(Object.assign(inst, { pending: 'running' }));
     }
   }
-  return out.sort((a, b) => a.start - b.start);
+  // Primero las de prioridad alta; dentro de cada prioridad, la más antigua primero
+  return out.sort((a, b) => prio(b) - prio(a) || a.start - b.start);
 }
 
 /** Pendientes de días anteriores que no se ven ya hoy: se «arrastran» a hoy en el calendario */

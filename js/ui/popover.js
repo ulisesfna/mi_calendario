@@ -90,7 +90,7 @@ export function renderPopover() {
       ${inst.recurring ? `<div class="pop-line">↻ <div>${esc(describeRule(it.recurrence, it.start))}</div></div>` : ''}
       ${it.location ? `<div class="pop-line">📍 <div>${esc(it.location)}</div></div>` : ''}
       ${cat ? `<div class="pop-line">🏷️ <div><button class="cat-chip" data-a="cat" style="--c:${cat.color}">${cat.icon ? cat.icon + ' ' : ''}${esc(cat.name)}</button></div></div>` : ''}
-      ${reminders.length ? `<div class="pop-line">🔔 <div>${reminders.map((r) => `<span class="tag">${esc(describeReminder(r))}</span>`).join(' ')}${Array.isArray(it.reminders) ? '' : ` <span class="muted small">(${it.exam ? 'de examen' : 'de la categoría'})</span>`}</div></div>` : ''}
+      ${reminders.length ? `<div class="pop-line">🔔 <div>${reminders.map((r) => `<span class="tag">${esc(describeReminder(r))}</span>`).join(' ')}${it.exam ? ` <span class="muted small">(de examen${it.reminders?.length ? ' + propios' : ''})</span>` : Array.isArray(it.reminders) ? '' : ' <span class="muted small">(de la categoría)</span>'}</div></div>` : ''}
       ${it.notes ? `<div class="pop-line">📝 <div class="pre">${esc(it.notes)}</div></div>` : ''}
       ${it.type === 'plan' && it.steps?.length ? `<div class="pop-line">📋 <div>${it.steps.filter((s) => s.done).length}/${it.steps.length} pasos completados</div></div>` : ''}
 

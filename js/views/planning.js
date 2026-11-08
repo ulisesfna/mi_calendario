@@ -5,6 +5,7 @@ import { instancesInRange, isPlanArchived, pendingTasks, planEnd, planProgress }
 import { describeRule } from '../recurrence.js';
 import { ctx } from '../ui/dom.js';
 import { categoryButtonHTML, openCategoryPicker } from '../ui/catpicker.js';
+import { prioMark } from './shared.js';
 
 let newPlanCat = null; // categoría elegida para el próximo planning
 import { addDays, diffDays, esc, fmtDate, fmtDuration, fmtTime, parseLocal, startOfDay, toLocalISO, uid } from '../util.js';
@@ -105,7 +106,8 @@ export function renderPlanning(el) {
   html += '</div>';
 
   // Columna lateral
-  const undated = st.items.filter((i) => i.type === 'task' && !i.start && !i.done);
+  // Primero las de prioridad alta (sort estable: dentro de cada prioridad, el orden de siempre)
+  const undated = st.items.filter((i) => i.type === 'task' && !i.start && !i.done).sort((a, b) => store.priorityOf(b) - store.priorityOf(a));
   const outside = st.items.filter((i) => !store.inAgenda(i));
   const today0 = startOfDay(now);
   const pend = pendingTasks(now).filter((i) => i.pending === 'overdue' || i.start < today0);
@@ -114,12 +116,12 @@ export function renderPlanning(el) {
       <p class="muted small">Tareas vencidas sin completar y tareas sin fin que siguen en curso. Se quedan aquí hasta que las completes.</p>
       ${pend.length ? pend.map((t) => `<div class="mini-row" data-inst="${t.id}" style="--c:${t.color}">
           <span class="chip-check" data-pend-done></span>
-          <span class="mini-t" data-pend-open title="${t.pending === 'overdue' ? 'Venció' : 'En curso desde'} el ${fmtDate(t.pending === 'overdue' ? t.end : t.start)}">${t.pending === 'overdue' ? '⚠' : '∞'} ${esc(t.title)}</span>
+          <span class="mini-t" data-pend-open title="${t.pending === 'overdue' ? 'Venció' : 'En curso desde'} el ${fmtDate(t.pending === 'overdue' ? t.end : t.start)}">${prioMark(t)}${t.pending === 'overdue' ? '⚠' : '∞'} ${esc(t.title)}</span>
           <button class="btn small" data-pend-move="0">Hoy</button><button class="btn small" data-pend-move="1">Mañana</button></div>`).join('') : '<p class="muted small">Nada pendiente. 🎉</p>'}
     </section>
     <section class="side-box"><h3>✅ Tareas sin fecha <span class="count">${undated.length}</span></h3>
       ${undated.length ? undated.map((t) => `<div class="mini-row" data-item="${t.id}" style="--c:${store.itemColor(t)}">
-          <span class="chip-check" data-item-done></span><span class="mini-t" data-item-edit>${esc(t.title)}</span>
+          <span class="chip-check" data-item-done></span><span class="mini-t" data-item-edit>${prioMark({ kind: 'item', item: t })}${esc(t.title)}</span>
           <button class="btn small" data-when="0">Hoy</button><button class="btn small" data-when="1">Mañana</button></div>`).join('') : '<p class="muted small">Nada pendiente sin fecha.</p>'}
     </section>
     <section class="side-box"><h3>🚫 Fuera de la agenda <span class="count">${outside.length}</span></h3>

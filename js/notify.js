@@ -1,9 +1,10 @@
 // Avisos: niveles de intensidad, sonidos generados, alarma en pantalla y planificador.
 import * as store from './store.js';
+import * as engine from './engine.js';
 import { buildInstance } from './engine.js';
 import { occurrenceKeys } from './recurrence.js';
 import { addDays, dateKey, esc, fmtDate, fmtRelative, fmtTime, parseLocal, uid } from './util.js';
-import { toast } from './ui/dom.js';
+import { toast, ctx as ui } from './ui/dom.js';
 import * as push from './push.js';
 import * as native from './native.js';
 
@@ -28,6 +29,7 @@ export const UNITS = {
 export const SOUNDS = { clasica: 'Clásica', suave: 'Suave', digital: 'Digital', campana: 'Campana' };
 
 export function describeReminder(r) {
+  if (r.insist) return `${LEVELS[r.level]?.icon ?? ''} 🔁 repetición (sin hacer)`;
   if (r.unit === 'abs') {
     const d = parseLocal(r.at);
     return `${LEVELS[r.level]?.icon ?? ''} ${d ? fmtDate(d) + ' ' + fmtTime(d) : '—'}`;
@@ -123,9 +125,11 @@ async function systemNotify(alarm) {
     data: { alarmId: alarm.id },
     icon: 'icons/icon-192.png',
     badge: 'icons/icon-192.png',
+    // Los navegadores suelen admitir solo 2 botones: en las tareas, «Hecha» sustituye a «Vale»
     actions: [
+      ...(alarm.task ? [{ action: 'done', title: '✔ Hecha' }] : []),
       { action: 'snooze', title: 'Posponer 10 min' },
-      { action: 'ack', title: strong ? 'Parar' : 'Vale' },
+      ...(alarm.task ? [] : [{ action: 'ack', title: strong ? 'Parar' : 'Vale' }]),
     ],
   };
   try {
@@ -162,6 +166,7 @@ function renderOverlay() {
         <div class="alarm-title">${esc(a.title)}</div>
         <div class="alarm-body">${esc(a.body)}</div>
         <div class="alarm-actions">
+          ${a.task ? `<button class="btn" data-alarm="done" data-id="${a.id}">✔ Hecha</button>` : ''}
           <button class="btn" data-alarm="snooze" data-min="5" data-id="${a.id}">+5 min</button>
           <button class="btn" data-alarm="snooze" data-min="10" data-id="${a.id}">+10 min</button>
           <button class="btn" data-alarm="snooze" data-min="30" data-id="${a.id}">+30 min</button>
@@ -208,8 +213,9 @@ export function alarmText(inst, reminder, now = Date.now()) {
   const loc = inst.item.location ? ` · ${inst.item.location}` : '';
   const atEnd = !!UNITS[reminder.unit]?.end;
   const v = reminder.value | 0;
+  const prefix = reminder.insist ? '🔁 Sigue sin hacer: ' : atEnd ? (v ? '⏳ Acaba pronto: ' : '🏁 Fin: ') : '';
   return {
-    title: `${atEnd ? (v ? '⏳ Acaba pronto: ' : '🏁 Fin: ') : ''}${inst.icon ? inst.icon + ' ' : ''}${inst.title}`,
+    title: `${prefix}${inst.icon ? inst.icon + ' ' : ''}${inst.title}`,
     body: atEnd
       ? (v ? `Termina a las ${fmtTime(inst.end)} (en ${v} min)` : `Ha terminado la sesión (${fmtTime(inst.start)}–${fmtTime(inst.end)})`)
       : `${when} (${rel})${loc}`,
@@ -223,6 +229,7 @@ function makeAlarm(inst, reminder) {
     key: alarmKey(inst, reminder),
     ...alarmText(inst, reminder),
     level: reminder.level ?? 'sound',
+    task: inst.item.type === 'task',
     color: inst.color,
     since: Date.now(),
     lastNotify: Date.now(),
@@ -275,6 +282,24 @@ export function ack(id, rerender = true) {
   onChange();
 }
 
+/**
+ * Marca como hecha la tarea de un aviso (botón «✔ Hecha» de la notificación).
+ * instId = aparición concreta (en las tareas que se repiten, solo esa). Devuelve el título o null.
+ */
+export function completeTask(instId) {
+  const inst = instId && engine.findInstance(instId);
+  if (!inst || inst.item.type !== 'task') return null;
+  if (!inst.done) store.mutate('Completar desde el aviso', () => engine.applyDone(inst, true));
+  return inst.title;
+}
+
+function doneFromAlarm(id) {
+  const a = activeAlarms().find((x) => x.id === id);
+  ack(id);
+  const title = completeTask(a?.instId);
+  if (title) toast(`✔ «${title}» marcada como hecha`, { action: ui.undo });
+}
+
 export function snooze(id, minutes = 10) {
   const a = activeAlarms().find((x) => x.id === id);
   if (!a) return;
@@ -306,6 +331,49 @@ function refTime(inst, r) {
   return inst.allDay ? new Date(inst.start).setHours(9, 0, 0, 0) : inst.start.getTime();
 }
 
+/**
+ * Tareas sin hacer que vuelven a avisar, según su prioridad: media cada 24 h (a la misma hora),
+ * alta cada 5 h. Cuentan desde su último aviso y siguen hasta que se marcan como hechas
+ * (en las que se repiten, hasta que llega la siguiente vez). Baja o ninguna: no repiten.
+ */
+export const INSIST_HOURS = { 2: 24, 3: 5 };
+const INSIST_AHEAD_DAYS = 7; // repeticiones que se programan por delante (la app las renueva al abrirse)
+
+function reminderAt(inst, r) {
+  if (r.unit === 'abs') return parseLocal(r.at)?.getTime() ?? null;
+  return refTime(inst, r) - offsetMin(r) * 60000;
+}
+
+function insistBetween(item, rems, t0, t1, out) {
+  const hours = INSIST_HOURS[store.priorityOf(item)];
+  if (!hours || !rems.length || !item.start) return;
+  const period = hours * 3600e3;
+  const end = Math.min(t1, Math.max(t0, Date.now()) + INSIST_AHEAD_DAYS * 86400e3);
+  if (end <= t0) return;
+  // Apariciones que pueden estar sin hacer (en las repetitivas, las de los últimos 60 días)
+  let list;
+  if (!item.recurrence) list = [{ inst: buildInstance(item, null), until: Infinity }];
+  else {
+    const keys = occurrenceKeys(item.start.slice(0, 10), item.recurrence, dateKey(addDays(new Date(t0), -60)), dateKey(addDays(new Date(end), 1)));
+    list = keys.map((k, i) => ({ inst: buildInstance(item, k), until: keys[i + 1] ? buildInstance(item, keys[i + 1]).start.getTime() : Infinity }));
+  }
+  for (const { inst, until } of list) {
+    if (inst.done) continue;
+    // Se repite el último de sus avisos (con su mismo nivel)
+    let anchor = null, base = null;
+    for (const r of rems) {
+      const at = reminderAt(inst, r);
+      if (at != null && (anchor == null || at > anchor)) [anchor, base] = [at, r];
+    }
+    if (base == null || anchor >= end) continue;
+    for (let k = Math.max(1, Math.floor((t0 - anchor) / period) + 1); ; k++) {
+      const at = anchor + k * period;
+      if (at > end || at >= until) break;
+      if (at > t0) out.push({ inst, r: { ...base, id: `${base.id ?? base.value + base.unit}~${k}`, insist: k }, at });
+    }
+  }
+}
+
 /** Avisos que tocan en el intervalo (t0, t1] */
 export function dueBetween(t0, t1) {
   const out = [];
@@ -313,6 +381,7 @@ export function dueBetween(t0, t1) {
     if (!item.start) continue;
     if (!store.inAgenda(item) && !Array.isArray(item.reminders)) continue;
     const rems = store.effectiveReminders(item);
+    if (item.type === 'task') insistBetween(item, rems, t0, t1, out);
     for (const r of rems) {
       if (r.unit === 'abs') {
         const at = parseLocal(r.at)?.getTime();
@@ -354,7 +423,8 @@ export function tick() {
     if (native.isNative) continue; // en la app de Android suenan las alarmas del propio móvil
     if (push.shownElsewhere(fk)) continue; // ya llegó con la app cerrada (aviso del servidor)
     const alarm = makeAlarm(d.inst, d.r);
-    if (now - d.at > 5 * 60000) missed.push({ ...alarm, at: d.at });
+    // Las repeticiones de tareas sin hacer que ya pasaron no se acumulan como perdidas (vendrá la siguiente)
+    if (now - d.at > 5 * 60000) d.r.insist || missed.push({ ...alarm, at: d.at });
     else fire(alarm);
   }
   // Pospuestos
@@ -389,12 +459,14 @@ export function init(changeCb) {
     const b = e.target.closest('[data-alarm]');
     if (!b) return;
     if (b.dataset.alarm === 'ack') ack(b.dataset.id);
+    else if (b.dataset.alarm === 'done') doneFromAlarm(b.dataset.id);
     else snooze(b.dataset.id, +b.dataset.min);
   });
   navigator.serviceWorker?.addEventListener('message', (e) => {
     const m = e.data;
     if (m?.type !== 'notification-action') return;
     if (m.action === 'snooze') snooze(m.alarmId, 10);
+    else if (m.action === 'done') doneFromAlarm(m.alarmId);
     else if (m.action === 'ack') ack(m.alarmId);
   });
   // Cualquier interacción desbloquea el audio (requisito de los navegadores)

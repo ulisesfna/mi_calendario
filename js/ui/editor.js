@@ -2,7 +2,7 @@
 import * as store from '../store.js';
 import * as engine from '../engine.js';
 import { defaultRule, describeRule, nthOf, isLastWeekdayOfMonth } from '../recurrence.js';
-import { LEVELS, UNITS, test as testLevel } from '../notify.js';
+import { INSIST_HOURS, LEVELS, UNITS, test as testLevel } from '../notify.js';
 import { nextFreeColor, EMOJIS } from '../palette.js';
 import { openModal, promptDialog, toast, ctx, floatingMenu } from './dom.js';
 import { deleteInstance } from './popover.js';
@@ -142,7 +142,7 @@ export function openEditor(opts = {}) {
           <div class="row wrap">
             <label class="field">¿Entra en la agenda?
               <select class="input" name="inAgenda">
-                <option value="inherit" ${agendaSel === 'inherit' ? 'selected' : ''}>Según la categoría (${catAg})</option>
+                <option value="inherit" ${agendaSel === 'inherit' ? 'selected' : ''}>${w.exam ? 'Automático (sí, es un examen)' : `Según la categoría (${catAg})`}</option>
                 <option value="yes" ${agendaSel === 'yes' ? 'selected' : ''}>Sí, mostrar en el calendario</option>
                 <option value="no" ${agendaSel === 'no' ? 'selected' : ''}>No, fuera de la agenda (sin avisos automáticos)</option>
               </select></label>
@@ -258,21 +258,40 @@ export function openEditor(opts = {}) {
           ${det}</div>`;
       }
 
+      /** Fila de un aviso: editable (sus datos están en w.reminders[i]) o solo para ver (heredado) */
+      function remRow(r, i, editable) {
+        const off = editable ? '' : 'disabled';
+        return `<div class="rem-row" ${editable ? `data-i="${i}"` : ''}>
+            ${r.unit === 'abs'
+              ? `<input type="datetime-local" class="input" data-rem="at" value="${r.at ?? ''}" ${off}>`
+              : `<input type="number" min="0" class="input num" data-rem="value" value="${r.value}" ${off}>`}
+            <select class="input" data-rem="unit" ${off}>${Object.entries(UNITS).map(([k, u]) => `<option value="${k}" ${r.unit === k ? 'selected' : ''}>${u.label}</option>`).join('')}</select>
+            <select class="input" data-rem="level" ${off}>${Object.entries(LEVELS).map(([k, l]) => `<option value="${k}" ${r.level === k ? 'selected' : ''}>${l.icon} ${l.label}</option>`).join('')}</select>
+            <button type="button" class="icon-btn" data-rem-test="${r.level}" title="Probar">▶</button>
+            ${editable ? '<button type="button" class="icon-btn" data-rem-del title="Quitar">✕</button>' : ''}
+          </div>`;
+      }
+
       function remindersUI() {
+        const examCheck = w.type === 'event' ? `<label class="check"><input type="checkbox" name="exam" ${w.exam ? 'checked' : ''}> 📝 Es un examen (entra en la agenda y lleva los avisos de examen)</label>` : '';
+        // Exámenes: los avisos comunes a todos (fijos aquí) + los extra de este examen
+        if (w.exam) {
+          const fixed = store.get().settings.examReminders ?? [];
+          const extra = Array.isArray(w.reminders) ? w.reminders : [];
+          return `<fieldset class="box"><legend>Avisos</legend>
+            ${examCheck}
+            <div class="field">Avisos de todos los exámenes <span class="muted small">(se cambian en Ajustes → Avisos)</span></div>
+            ${fixed.map((r) => remRow(r, 0, false)).join('') || '<div class="muted small">Ninguno.</div>'}
+            <div class="field">Avisos extra de este examen</div>
+            ${extra.map((r, i) => remRow(r, i, true)).join('') || '<div class="muted small">Ninguno. Añade los que quieras:</div>'}
+            ${eventChips()}
+          </fieldset>`;
+        }
         const inherit = !Array.isArray(w.reminders);
         const list = inherit ? store.effectiveReminders(w) : w.reminders;
         const cat = store.getCategory(w.categoryId);
-        const rows = list.map((r, i) => `<div class="rem-row" data-i="${i}">
-            ${r.unit === 'abs'
-              ? `<input type="datetime-local" class="input" data-rem="at" value="${r.at ?? ''}" ${inherit ? 'disabled' : ''}>`
-              : `<input type="number" min="0" class="input num" data-rem="value" value="${r.value}" ${inherit ? 'disabled' : ''}>`}
-            <select class="input" data-rem="unit" ${inherit ? 'disabled' : ''}>${Object.entries(UNITS).map(([k, u]) => `<option value="${k}" ${r.unit === k ? 'selected' : ''}>${u.label}</option>`).join('')}</select>
-            <select class="input" data-rem="level" ${inherit ? 'disabled' : ''}>${Object.entries(LEVELS).map(([k, l]) => `<option value="${k}" ${r.level === k ? 'selected' : ''}>${l.icon} ${l.label}</option>`).join('')}</select>
-            <button type="button" class="icon-btn" data-rem-test="${r.level}" title="Probar">▶</button>
-            ${inherit ? '' : '<button type="button" class="icon-btn" data-rem-del title="Quitar">✕</button>'}
-          </div>`).join('');
-        const source = w.exam ? 'examen (Ajustes → Avisos)'
-          : w.type === 'task' ? 'tarea: a la hora de empezar (Ajustes → Avisos)'
+        const rows = list.map((r, i) => remRow(r, i, !inherit)).join('');
+        const source = w.type === 'task' ? 'tarea: a la hora de empezar (Ajustes → Avisos)'
           : w.type === 'plan' ? 'planning: al acabar la sesión (Ajustes → Avisos)'
           : cat ? `«${esc(cat.name)}»` : 'los ajustes';
         // Plannings: lo habitual es avisar al acabar la sesión
@@ -296,28 +315,36 @@ export function openEditor(opts = {}) {
             <button type="button" class="chipbtn" data-addrem="abs">＋ Fecha exacta</button>
           </div>`;
         return `<fieldset class="box"><legend>Avisos</legend>
-          ${w.type === 'event' ? `<label class="check"><input type="checkbox" name="exam" ${w.exam ? 'checked' : ''}> 📝 Es un examen (avisos de examen automáticos)</label>` : ''}
+          ${examCheck}
           <label class="check"><input type="checkbox" name="inheritRem" ${inherit ? 'checked' : ''}> Usar los avisos de ${source}</label>
           ${rows || '<div class="muted small">Sin avisos.</div>'}
-          ${inherit ? '' : w.type === 'task' ? taskChips : w.type === 'plan' ? planChips : `<div class="chips">
+          ${inherit ? '' : w.type === 'task' ? taskChips : w.type === 'plan' ? planChips : eventChips()}
+        </fieldset>`;
+      }
+
+      function eventChips() {
+        return `<div class="chips">
             <button type="button" class="chipbtn" data-addrem="10,min,vibrate">＋ 10 min 📳</button>
             <button type="button" class="chipbtn" data-addrem="30,min,sound">＋ 30 min 🔔</button>
             <button type="button" class="chipbtn" data-addrem="1,h,sound">＋ 1 h 🔔</button>
             <button type="button" class="chipbtn" data-addrem="1,d,sound">＋ 1 día 🔔</button>
+            <button type="button" class="chipbtn" data-addrem="3,d,sound">＋ 3 días 🔔</button>
             <button type="button" class="chipbtn" data-addrem="1,w,visual">＋ 1 semana 🔕</button>
             <button type="button" class="chipbtn" data-addrem="0,min,alarm">＋ Alarma a la hora ⏰</button>
             <button type="button" class="chipbtn" data-addrem="0,min,persistent">＋ Persistente 🚨</button>
             <button type="button" class="chipbtn" data-addrem="abs">＋ Fecha exacta</button>
-          </div>`}
-        </fieldset>`;
+          </div>`;
       }
 
       function taskUI() {
         return `<fieldset class="box"><legend>Tarea</legend>
           <div class="row wrap center">Prioridad
-            <div class="seg small">${['Ninguna', 'Baja', 'Media', 'Alta'].map((l, i) => `<button type="button" class="${(w.priority | 0) === i ? 'on' : ''}" data-prio="${i}">${['–', '▽', '◇', '▲'][i]} ${l}</button>`).join('')}</div>
+            <div class="seg small">${store.PRIORITY.map((p, i) => `<button type="button" class="${(w.priority | 0) === i ? 'on' : ''}" data-prio="${i}">${p.icon} ${p.label}</button>`).join('')}</div>
             <label class="check"><input type="checkbox" name="done" ${w.done ? 'checked' : ''}> Hecha</label>
           </div>
+          <div class="muted small">${['Sin prioridad: avisa como siempre.', 'Baja: avisa como siempre.',
+            `Media: si no la marcas como hecha, vuelve a avisar cada ${INSIST_HOURS[2]} h a la misma hora.`,
+            `Alta: si no la marcas como hecha, vuelve a avisar cada ${INSIST_HOURS[3]} h.`][w.priority | 0]}</div>
           <div class="checklist">${(w.checklist ?? []).map((c, i) => `<div class="row center" data-ci="${i}"><input type="checkbox" data-cl="done" ${c.done ? 'checked' : ''}><input class="input grow" data-cl="text" value="${esc(c.text)}"><button type="button" class="icon-btn" data-cl-del>✕</button></div>`).join('')}</div>
           <div class="row"><input class="input grow" name="newCheck" placeholder="＋ Subtarea (Enter)"></div>
           <label class="field">Fecha límite (opcional)<input type="date" class="input" name="deadline" value="${w.deadline ?? ''}"></label>
@@ -477,10 +504,18 @@ export function openEditor(opts = {}) {
           case 'inheritRem':
             w.reminders = t.checked ? null : structuredClone(store.effectiveReminders({ ...w, reminders: null }));
             break;
-          case 'exam':
+          case 'exam': {
+            const extra = Array.isArray(w.reminders) ? w.reminders : [];
             w.exam = t.checked; // false = desmarcado a mano (no se vuelve a marcar solo)
-            if (t.checked) w.reminders = null; // pasar a usar los avisos de examen
+            if (t.checked) {
+              w.reminders = null; // avisos de examen, sin extras de momento
+              if (w.inAgenda === false) w.inAgenda = null; // los exámenes entran en la agenda
+            } else {
+              // Deja de ser examen: vuelve a los de la categoría, conservando los extra que se hubieran puesto
+              w.reminders = extra.length ? [...structuredClone(store.effectiveReminders({ ...w, reminders: null })), ...extra] : null;
+            }
             break;
+          }
           case 'inAgenda':
             w.inAgenda = t.value === 'yes' ? true : t.value === 'no' ? false : null;
             rerender = false;

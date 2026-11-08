@@ -26,9 +26,32 @@ import com.getcapacitor.annotation.Permission;
 @CapacitorPlugin(name = "Alarmas", permissions = { @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "avisos") })
 public class AlarmasPlugin extends Plugin {
 
+    private static volatile AlarmasPlugin abierto;
+
     @Override
     public void load() {
+        abierto = this;
         Alarmas.crearCanales(getContext());
+    }
+
+    /** Tarea marcada como hecha desde la notificación: si la app está abierta, avisar a JS (evento «hechas») */
+    static void avisarHechas() {
+        AlarmasPlugin p = abierto;
+        if (p == null) return;
+        try {
+            p.notifyListeners("hechas", new JSObject());
+        } catch (RuntimeException ignored) {
+            // App ya cerrada: lo recogerá al abrirse (hechas())
+        }
+    }
+
+    /** Tareas marcadas como hechas desde las notificaciones desde la última vez: { hechas: [instId…] } */
+    @PluginMethod
+    public void hechas(PluginCall call) {
+        JSArray l = new JSArray();
+        org.json.JSONArray h = Alarmas.sacarHechas(getContext());
+        for (int i = 0; i < h.length(); i++) l.put(h.optString(i));
+        call.resolve(new JSObject().put("hechas", l));
     }
 
     @PluginMethod
