@@ -119,6 +119,8 @@ function setView(v) {
   if (!VIEWS[v]) return;
   ctx.view = v;
   ctx.keepScroll = null;
+  // La agenda empieza hoy: si se viene de mirar días pasados (p. ej. el día 1 del mes), volver a hoy
+  if (v === 'agenda' && ctx.cursor < startOfDay(new Date())) ctx.cursor = new Date();
   store.quiet((s) => (s.ui.view = v));
   closePopover();
   render();
@@ -137,8 +139,10 @@ function range() {
 /** ¿El mes es más alto que la pantalla? Entonces el dedo también puede desplazarlo (ver wireSwipe) */
 function markMonthScroll() {
   const view = $('#view');
-  view.querySelector('.month')?.classList.toggle('scrolls', view.scrollHeight > view.clientHeight + 4);
+  view.querySelector('.month')?.classList.toggle('scrolls', monthScrolls(view));
 }
+/** Solo cuenta si de verdad se puede desplazar (en el móvil la vista del mes no se desplaza nunca) */
+const monthScrolls = (view) => view.scrollHeight > view.clientHeight + 4 && getComputedStyle(view).overflowY !== 'hidden';
 
 /** Eje en el que se desliza cada vista: el mes de arriba a abajo, el resto de lado */
 const swipeAxis = () => (ctx.view === 'month' ? 'y' : 'x');
@@ -149,7 +153,12 @@ function step(dir, { animate = true } = {}) {
     case 'day': ctx.cursor = addDays(c, dir); break;
     case '3day': ctx.cursor = addDays(c, 3 * dir); break;
     case 'week': ctx.cursor = addDays(c, 7 * dir); break;
-    case 'month': ctx.cursor = addMonths(c, dir); break;
+    case 'month': {
+      // Al volver al mes actual, el cursor vuelve a hoy (no al día 1), para que Día/Agenda empiecen hoy
+      const m = addMonths(c, dir), now = new Date();
+      ctx.cursor = m.getFullYear() === now.getFullYear() && m.getMonth() === now.getMonth() ? now : m;
+      break;
+    }
     case 'agenda': ctx.cursor = addDays(c, 7 * dir); break;
     default: return;
   }
@@ -257,7 +266,7 @@ function wireSwipe() {
   const canSwipe = () => ['day', '3day', 'week', 'month', 'agenda'].includes(ctx.view) && !hasModal();
   // Si el mes no cabe en la pantalla (móvil en horizontal, tablet, ventana baja), primero se desplaza
   // para ver todas las semanas y solo al llegar arriba o abajo del todo se cambia de mes
-  const scrolls = () => view.scrollHeight > view.clientHeight + 4;
+  const scrolls = () => monthScrolls(view);
   const atTop = () => view.scrollTop <= 1;
   const atBottom = () => view.scrollTop + view.clientHeight >= view.scrollHeight - 2;
 

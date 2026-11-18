@@ -335,7 +335,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .tg, .agenda { touch-action: pan-y pinch-zoom; }
 .month-head { display: grid; grid-template-columns: repeat(7, 1fr); background: var(--surface); border-bottom: 1px solid var(--line); }
 .month-head div { text-align: center; font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--muted); padding: 6px 0; }
-.month-grid { flex: 1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); }
+/* min-height: 0 para que un día con muchos eventos no estire todas las semanas (el sobrante sale como «+N») */
+.month-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); }
 .mcell { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 3px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; cursor: copy; }
 .mcell.other { background: color-mix(in srgb, var(--surface-2) 50%, transparent); }
 .mcell.other .mnum { color: var(--muted); }
