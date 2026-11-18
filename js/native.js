@@ -2,6 +2,7 @@
 // En el navegador (PWA) no hace nada: `isNative` es false.
 import * as store from './store.js';
 import { alarmKey, alarmText, completeTask, dueBetween, LEVELS } from './notify.js';
+import { hasModal } from './ui/dom.js';
 
 const Cap = window.Capacitor;
 export const isNative = !!Cap?.isNativePlatform?.() && typeof Cap.registerPlugin === 'function';
@@ -164,29 +165,108 @@ export function soundProblems(st = lastState) {
 }
 
 // ---------------- Versiones nuevas (GitHub) ----------------
+// Cada vez que se suben cambios, GitHub publica el APK, la app web (web.zip) y version.json.
+// · Si la parte nativa no ha cambiado, la app web nueva se descarga sola y se usa en lugar de la del
+//   APK (sin instalar nada). Ver android-app/nativo/Actualizar.java.
+// · Si ha cambiado, el APK se descarga e instala desde la propia app.
 
 let buildInfo = null;
 export const buildInfoSync = () => buildInfo;
+/** { build: APK, web: versión de la app web en uso, nativo, date, self: admite actualizaciones propias } */
 export async function getBuildInfo() {
   if (!isNative) return null;
-  buildInfo ??= await fetch('apk-version.json').then((r) => r.json()).catch(() => ({}));
+  if (!buildInfo) {
+    const file = await fetch('apk-version.json').then((r) => r.json()).catch(() => ({}));
+    const v = await Alarmas.version().catch(() => null); // APK anteriores no lo tienen
+    buildInfo = { ...file, web: file.build, ...(v ? { build: v.build, web: v.web, nativo: v.nativo, self: true } : {}) };
+  }
   return buildInfo;
 }
 
-/** Comprueba si hay un APK más nuevo publicado en GitHub. Devuelve {version, url} o null. */
+function saveCheck() {
+  try {
+    localStorage.setItem(UPDATE_KEY, JSON.stringify({ at: Date.now() }));
+  } catch { /* */ }
+}
+
+/**
+ * ¿Hay una versión nueva? Devuelve null o { version, kind, … }:
+ * kind 'web' (se descarga sola), 'apk' (hay que instalar el APK) o 'link' (APK antiguo: abrir la descarga)
+ */
 export async function checkUpdate() {
   const info = await getBuildInfo();
-  if (!info?.repo) return null;
+  if (!info) return null;
+  if (info.self) {
+    const rel = await Alarmas.buscarVersion();
+    saveCheck();
+    if (!(rel.build > Math.max(info.web ?? 0, info.build ?? 0))) return null;
+    if (rel.nativo === info.nativo && rel.web) return { version: rel.build, kind: 'web', rel };
+    return { version: rel.build, kind: 'apk', url: rel.apk };
+  }
+  if (!info.repo) return null;
   const r = await fetch(`https://api.github.com/repos/${info.repo}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
   if (!r.ok) throw new Error(`GitHub respondió ${r.status}`);
   const j = await r.json();
+  saveCheck();
   const latest = parseInt(String(j.tag_name ?? '').replace(/\D/g, ''), 10);
-  try {
-    localStorage.setItem(UPDATE_KEY, JSON.stringify({ at: Date.now(), latest }));
-  } catch { /* */ }
   if (!(latest > info.build)) return null;
-  const asset = j.assets?.find((a) => a.name.endsWith('.apk'));
-  return { version: latest, url: asset?.browser_download_url ?? `https://github.com/${info.repo}/releases/latest/download/Calendario.apk` };
+  return { version: latest, kind: 'link', url: `https://github.com/${info.repo}/releases/latest/download/Calendario.apk` };
+}
+
+/** Aplica una versión nueva. Web: la descarga y, con `now`, recarga la app con ella (si no, al volver a abrirla). */
+export async function applyUpdate(u, { now = false } = {}) {
+  if (u.kind === 'web') {
+    await Alarmas.bajarWeb({ build: u.rel.build, web: u.rel.web, nativo: u.rel.nativo });
+    if (now) await Alarmas.aplicarWeb({ build: u.rel.build });
+    return;
+  }
+  if (u.kind === 'apk') return installApk(u.url);
+  openExternal(u.url);
+}
+
+/** Descarga el APK desde la app (con el progreso) y abre el instalador de Android */
+async function installApk(url) {
+  const t = toastFn('Descargando la actualización… 0 %', { timeout: 0 });
+  const h = await Alarmas.addListener('descarga', ({ pct }) => t?.set(`Descargando la actualización… ${pct} %`)).catch(() => null);
+  try {
+    await Alarmas.instalarApk({ url });
+    t?.set('Instalando… (cuando acabe, ábrela desde la notificación)');
+    setTimeout(() => t?.remove(), 10000);
+  } catch (e) {
+    t?.remove();
+    throw e;
+  } finally {
+    h?.remove?.();
+  }
+}
+
+/** Al abrir la app y al volver a ella (como mucho cada 30 min): buscar y descargar la versión nueva */
+async function autoUpdate(justOpened) {
+  let last = null;
+  try {
+    last = JSON.parse(localStorage.getItem(UPDATE_KEY));
+  } catch { /* */ }
+  if (last && Date.now() - last.at < 30 * 60e3) return;
+  const u = await checkUpdate();
+  if (!u) return;
+  const fail = (e) => toastFn(e?.message ?? String(e), { timeout: 10000 });
+  if (u.kind !== 'web') {
+    toastFn(`Hay una versión nueva de la app (v${u.version})`, {
+      actionLabel: 'Actualizar', timeout: 30000, action: () => applyUpdate(u).catch(fail),
+    });
+    return;
+  }
+  await applyUpdate(u); // descargada: si no se aplica ahora, se usará al volver a abrir la app
+  const busy = hasModal() || document.activeElement?.matches?.('input, textarea, select') || document.visibilityState !== 'visible';
+  if (justOpened && performance.now() < 30000 && !busy) {
+    // Recién abierta y sin nada a medias: recargar ya con la versión nueva
+    toastFn(`Actualizando a la versión ${u.version}…`, { timeout: 3000 });
+    setTimeout(() => Alarmas.aplicarWeb({ build: u.version }).catch(fail), 1200);
+  } else {
+    toastFn(`Versión ${u.version} descargada`, {
+      actionLabel: 'Aplicar ahora', timeout: 15000, action: () => Alarmas.aplicarWeb({ build: u.version }).catch(fail),
+    });
+  }
 }
 
 /** Abre el enlace en el navegador del móvil (que descarga el APK) */
@@ -203,6 +283,9 @@ export function openExternal(url) {
 export async function init({ back, toast }) {
   if (!isNative) return;
   toastFn = toast;
+  // La app ha arrancado: si esta versión web es una descargada, se queda (si no llegara aquí,
+  // la próxima vez que se abra la app se volvería sola a la versión que trae el APK)
+  Alarmas.webOk().catch(() => {});
   document.documentElement.classList.add('native');
   // «✔ Hecha» pulsado con la app abierta: apuntarlo ya
   Alarmas.addListener?.('hechas', () => scheduleSoon(300));
@@ -228,14 +311,8 @@ export async function init({ back, toast }) {
     });
   }
 
-  // Versión nueva: como mucho una comprobación cada 12 h
-  let last = null;
-  try {
-    last = JSON.parse(localStorage.getItem(UPDATE_KEY));
-  } catch { /* */ }
-  if (!last || Date.now() - last.at > 12 * 3600e3) {
-    setTimeout(() => checkUpdate().then((u) => u && toast(`Hay una versión nueva de la app (v${u.version})`, {
-      actionLabel: 'Descargar', timeout: 30000, action: () => openExternal(u.url),
-    })).catch(() => {}), 6000);
-  }
+  // Versiones nuevas: al abrir y al volver a la app (como mucho cada 30 min)
+  Alarmas.addListener?.('instalacion', ({ error }) => error && toast(error, { timeout: 10000 }));
+  setTimeout(() => autoUpdate(true).catch(() => {}), 4000);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && autoUpdate(false).catch(() => {}));
 }

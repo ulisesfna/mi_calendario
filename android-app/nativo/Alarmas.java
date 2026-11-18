@@ -207,7 +207,7 @@ final class Alarmas {
 
     // ---------------- Mostrar ----------------
 
-    private static int icono(Context ctx) {
+    static int icono(Context ctx) {
         int r = ctx.getResources().getIdentifier("ic_stat_cal", "drawable", ctx.getPackageName());
         return r != 0 ? r : android.R.drawable.ic_popup_reminder;
     }

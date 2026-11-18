@@ -153,9 +153,19 @@ Con **volumen propio**, la app pone el volumen de alarma del móvil a ese nivel 
 **Límites:** el móvil programa los avisos de los próximos 45 días cada vez que abres la app o cambias algo.
 Lo que cambies en **otro** dispositivo llega al móvil cuando abras la app en él (al abrirla se sincroniza).
 
-**Actualizar:** sube los archivos cambiados a GitHub como siempre. En ~5 minutos hay APK nuevo, y la app te avisa
-(«Hay una versión nueva → Descargar»); también en *Ajustes → Versión de la app → Buscar actualización*.
-Se instala encima y **tus datos se conservan**.
+**Actualizar:** sube los archivos cambiados a GitHub como siempre. En ~5 minutos GitHub publica la versión nueva
+(el APK, la app web `web.zip` y `version.json`) y la app se actualiza sola, sin pasar por el navegador:
+
+- **Casi siempre** (solo cambia la app web): al abrir la app descarga la versión nueva y se recarga con ella
+  en unos segundos («Actualizando a la versión N…»). No se instala nada. Si una versión descargada no
+  llegara a arrancar, al volver a abrir la app se vuelve sola a la que trae el APK.
+- **Si cambia la parte de Android** (`android-app/`): aviso «Hay una versión nueva de la app → Actualizar».
+  La app descarga el APK y abre el instalador de Android directamente (la primera vez pide permitir que
+  *Mi calendario* instale apps). Al acabar, una notificación la vuelve a abrir de un toque.
+- También a mano: *Ajustes → Versión de la app → Buscar actualización*.
+
+Siempre se instala encima y **tus datos se conservan**. Si cambias `android-app/apk.yml`, pégalo también en
+`.github/workflows/apk.yml` (es el que usa GitHub).
 
 ---
 

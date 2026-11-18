@@ -134,9 +134,13 @@ function installHTML() {
 function versionHTML() {
   if (!native.isNative) return '';
   const b = native.buildInfoSync();
+  const v = b?.web || b?.build;
+  // Si la app web se actualizó sola, también la versión del APK instalado
+  const apk = b?.self && b.web && b.web !== b.build ? ` · app instalada: ${b.build}` : '';
   return `<fieldset class="box"><legend>📱 Versión de la app</legend>
-    <div class="row wrap center"><span class="small">${b?.build ? `Versión ${b.build}${b.date ? ` (${esc(b.date)})` : ''}` : 'Versión de desarrollo'}</span>
+    <div class="row wrap center"><span class="small">${v ? `Versión ${v}${b.date ? ` (${esc(b.date)})` : ''}${apk}` : 'Versión de desarrollo'}</span>
     <button type="button" class="btn small" data-native-act="update">Buscar actualización</button></div>
+    ${b?.self ? '<p class="muted small">Las novedades se descargan solas al abrir la app. Solo cuando cambia la parte de Android hay que instalarla (desde aquí, sin pasar por el navegador).</p>' : ''}
   </fieldset>`;
 }
 import { download, esc, fmtDate, fmtTime, parseLocal, readFileText, uid, dateKey } from '../util.js';
@@ -263,8 +267,17 @@ export function openSettings() {
               toast('Alarma de prueba dentro de 1 minuto: cierra la app y bloquea el móvil', { timeout: 8000 });
             } else if (act === 'update') {
               const u = await native.checkUpdate();
-              if (u) toast(`Hay una versión nueva (v${u.version})`, { actionLabel: 'Descargar', timeout: 30000, action: () => native.openExternal(u.url) });
-              else toast('Ya tienes la última versión');
+              if (!u) toast('Ya tienes la última versión');
+              else if (u.kind === 'web') {
+                // Solo la app web: se descarga y la app se recarga con ella (sin instalar nada)
+                toast(`Actualizando a la versión ${u.version}…`, { timeout: 4000 });
+                await native.applyUpdate(u, { now: true });
+              } else {
+                toast(`Hay una versión nueva de la app (v${u.version})`, {
+                  actionLabel: 'Actualizar', timeout: 30000,
+                  action: () => native.applyUpdate(u).catch((e2) => toast(e2.message ?? String(e2), { timeout: 10000 })),
+                });
+              }
             }
           } catch (err) {
             toast(err.message ?? String(err), { timeout: 8000 });

@@ -50,9 +50,14 @@ public class AlarmaReceiver extends BroadcastReceiver {
                 // Ya no suena nada: devolver el volumen de alarma que tenía el móvil
                 Sonidos.restaurar(ctx);
                 break;
+            case Actualizar.INSTALADA:
+                // Respuesta del instalador de Android (confirmar, error o cancelada)
+                Actualizar.resultado(ctx, intent);
+                break;
             default:
                 // Arranque del móvil, app actualizada o permiso de alarmas exactas concedido
                 Alarmas.reprogramar(ctx);
+                if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(accion)) Actualizar.trasActualizar(ctx);
         }
     }
 }

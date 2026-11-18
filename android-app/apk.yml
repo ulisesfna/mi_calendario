@@ -47,6 +47,11 @@ jobs:
           echo "$APK_KEYSTORE" | base64 -d > "$RUNNER_TEMP/llave.p12"
           echo "KEYSTORE_FILE=$RUNNER_TEMP/llave.p12" >> "$GITHUB_ENV"
 
+      # Si la parte nativa no cambia, la app instalada se actualiza sola descargando web.zip (sin instalar el APK)
+      - name: Huella de la parte nativa
+        run: |
+          echo "NATIVO=$(cat android-app/nativo/*.java android-app/parchear.py android-app/package.json android-app/capacitor.config.json .github/workflows/apk.yml | sha256sum | cut -c1-16)" >> "$GITHUB_ENV"
+
       - name: Preparar el proyecto Android
         working-directory: android-app
         run: |
@@ -60,16 +65,28 @@ jobs:
         working-directory: android-app/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: App web y version.json (para las actualizaciones sin instalar)
+        run: |
+          (cd android-app/android/app/src/main/assets/public && zip -qr -X "$GITHUB_WORKSPACE/web.zip" .)
+          python3 - <<'EOF'
+          import hashlib, json, os
+          sha = hashlib.sha256(open('web.zip', 'rb').read()).hexdigest()
+          build, repo = int(os.environ['BUILD']), os.environ['REPO']
+          json.dump({'build': build, 'nativo': os.environ['NATIVO'], 'web': sha,
+                     'apk': f'https://github.com/{repo}/releases/download/v{build}/Calendario.apk'}, open('version.json', 'w'))
+          print(open('version.json').read())
+          EOF
 
       - name: Publicar en Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp android-app/android/app/build/outputs/apk/debug/app-debug.apk Calendario.apk
+          cp android-app/android/app/build/outputs/apk/release/app-release.apk Calendario.apk
           tag="v${BUILD}"
-          gh release create "$tag" Calendario.apk --title "Mi calendario $tag" --latest \
-            --notes "Descarga **Calendario.apk** en el móvil y ábrelo para instalar o actualizar (tus datos se conservan)."
+          gh release create "$tag" Calendario.apk web.zip version.json --title "Mi calendario $tag" --latest \
+            --notes "Descarga **Calendario.apk** en el móvil y ábrelo para instalar o actualizar (tus datos se conservan). Si ya tienes la app, se actualiza sola desde dentro."
           # Borrar las versiones anteriores (solo se guarda la última)
           for old in $(gh release list --limit 100 --json tagName --jq '.[].tagName'); do
             if [ "$old" != "$tag" ]; then gh release delete "$old" --cleanup-tag --yes || true; fi

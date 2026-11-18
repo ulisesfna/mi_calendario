@@ -74,7 +74,9 @@ export function toast(msg, { action, actionLabel = 'Deshacer', timeout = 5000 } 
     action();
     remove();
   });
-  setTimeout(remove, timeout);
+  if (timeout > 0) setTimeout(remove, timeout);
+  // Para cambiar el texto (p. ej. el progreso de una descarga) o quitarlo antes de tiempo
+  return { set: (m) => (el.querySelector('span').textContent = m), remove };
 }
 
 export function confirmDialog(message, { okLabel = 'Aceptar', danger = false } = {}) {
