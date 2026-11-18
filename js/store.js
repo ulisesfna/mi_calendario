@@ -31,6 +31,8 @@ export const DEFAULT_SETTINGS = {
     { id: 'e3', value: 90, unit: 'min', level: 'alarm' },
   ],
   persistentRepeatMin: 2,
+  // Minutos antes de cada alarma (⏰/🚨) en que llega una notificación normal avisando de ella (0 = no)
+  alarmHeadsUp: 30,
   alarmVolume: 0.8,
   alarmSound: 'clasica', // clasica | suave | digital | campana
   vibration: {

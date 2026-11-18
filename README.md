@@ -145,6 +145,8 @@ así que en modo vibración solo vibra, salvo que marques *Que suenen aunque el 
 ⏰ Alarma suena (aunque el móvil esté en silencio) durante 3 minutos o hasta que la toques; 🚨 Persistente igual, se queda fija y
 **se repite cada pocos minutos** (hasta 1 hora) hasta que pulses **Parar**. *Posponer 10 min* y *Parar* funcionan
 desde la notificación sin abrir la app. Tras reiniciar el móvil las alarmas se vuelven a programar solas.
+Antes de cada ⏰/🚨 llega un 🔔 normal avisando de ella («⏰ Alarma en 30 min: …»), salvo que ya haya otro aviso
+de lo mismo por esas fechas. La antelación (o quitarlo) se elige en *Ajustes → Avisos → Avisar antes de cada alarma*.
 El sonido y el volumen se eligen en *Ajustes → Avisos* (sonidos propios, la alarma del móvil o cualquier tono suyo).
 Con **volumen propio**, la app pone el volumen de alarma del móvil a ese nivel mientras suena y luego lo deja como estaba.
 
@@ -172,13 +174,13 @@ Doble clic en **`Abrir calendario.bat`** (usa Python). Se abre `http://localhost
 | Avisos de las tareas | Por defecto **a la hora en que empiezan** (*Ajustes → Avisos → Avisos de las tareas*). En el editor, los botones «a la hora» van primero; también se pueden poner avisos antes. |
 | Tareas pendientes | Las vencidas sin completar (⚠) y las «sin fin» de días anteriores (∞) se muestran **hoy** en el calendario y en **Agenda → ⏳ Pendientes** y **Planning → ⏳ Pendientes**, con botones *Hoy / Mañana*, hasta que las completes. Se puede desactivar en el menú 👁. |
 | Plannings en la agenda | Al crear un planning ya lleva **una sesión programada** (desde la próxima media hora, 1 h), así sale en el calendario y en Agenda. Al **acabar cada sesión** avisa con 🔔 vibración + sonido (*Ajustes → Avisos → Avisos de los plannings*; también «5 min antes de acabar», etc.). |
-| **Planning** | Pasos con fecha opcional, fecha objetivo, progreso, sesiones recurrentes. Vista **Planning** agrupada por categoría. Encima de una clase se ve sólido y la clase de debajo translúcida; si dos plannings se solapan, ⚠. |
+| **Planning** | Pasos con fecha opcional, fecha objetivo, progreso, sesiones recurrentes. Botones para repetir la sesión los días después (*Día siguiente*, *+2 días*… *+2 semanas*, combinables). Vista **Planning** agrupada por categoría. Encima de una clase se ve sólido y la clase de debajo translúcida; si dos plannings se solapan, ⚠. |
 | Mover antes / después | Ficha del evento: **−1 día / −1 h / −15′ / +15′ / +1 h / +1 día**, flechas del teclado, arrastrar (en el móvil, mantener pulsado). Solo esta / esta y siguientes / toda la serie. |
 | Avisos | Antelación libre y 5 niveles: 🔕 visual, 📳 vibración, 🔔 sonido, ⏰ alarma, 🚨 persistente. |
 | Exámenes | Los exámenes (EXAM de Chronos, o la casilla «📝 Es un examen» del editor) avisan solos: 🔔 2 semanas y 1 semana antes y ⏰ alarma 1 h 30 min antes. Se cambia en *Ajustes → Avisos → Avisos de los exámenes*; un examen con avisos propios los conserva. |
 | Colores | 96 tonos, neutros, 10 paletas, recientes, color libre y tonos por tipo de clase. |
 | Importar Chronos | TEORIA / TEOPR / PROB / EXAM y los grupos cuentan como una sola asignatura, cada tipo con su tono. Para importaciones antiguas: ⋯ del grupo → **🧩 Unir asignaturas repetidas**. |
-| Navegación | Día / 3 días / Semana / Mes / Agenda / Planning. Deslizar para cambiar de periodo (de arriba abajo en Mes). Botón 👁 para mostrar u ocultar eventos, tareas y plannings. |
+| Navegación | Día / 3 días / Semana / Mes / Agenda / Planning. Deslizar para cambiar de periodo (de arriba abajo en Mes; si el mes no cabe en la pantalla, primero se desplaza hasta la última semana y desde ahí se pasa al siguiente). Botón 👁 para mostrar u ocultar eventos, tareas y plannings. |
 | Repeticiones | Cada N días/semanas/meses/años, varios días, «2.º martes» / «último viernes», hasta fecha o N veces, fechas concretas, días y periodos excluidos. |
 | Agenda sí / no | 📅/🚫 en cada elemento o por categoría. Fuera de agenda: sin avisos automáticos ni vista Agenda; en Mes, como línea fina. |
 | Extra | Añadir rápido en lenguaje natural, acciones en bloque por categoría, festivos, deshacer (Ctrl+Z), modo oscuro, exportar a `.ics`. |

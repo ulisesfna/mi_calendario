@@ -38,6 +38,15 @@ function nativeHTML() {
   </div>`;
 }
 
+/** Notificación normal unos minutos antes de cada alarma, para que no pille por sorpresa */
+function headsUpHTML(s) {
+  const v = s.alarmHeadsUp ?? 30;
+  return `<label class="field">Avisar antes de cada alarma<select class="input" name="alarmHeadsUp">
+    ${[[0, 'No'], [10, '10 min antes'], [15, '15 min antes'], [30, '30 min antes'], [60, '1 h antes'], [120, '2 h antes']]
+      .map(([m, l]) => `<option value="${m}" ${v === m ? 'selected' : ''}>${l}</option>`).join('')}
+  </select></label>`;
+}
+
 /** App de Android: sonido y volumen de las alarmas y de los avisos con sonido, y por qué algo podría no sonar */
 function nativeSoundHTML() {
   const st = native.state() ?? {};
@@ -153,12 +162,12 @@ export function openSettings() {
             <div class="chips">${Object.entries(LEVELS).map(([k, l]) => `<button class="chipbtn" data-test="${k}">${l.icon} ${l.short}</button>`).join('')}</div>
             ${native.isNative ? `${nativeSoundHTML()}
             <div class="row wrap">
-              <label class="field">Repetir la persistente cada (min)<input type="number" min="1" max="60" class="input num" name="persistentRepeatMin" value="${s.persistentRepeatMin}"></label>
+              <label class="field">Repetir la persistente cada (min)<input type="number" min="1" max="60" class="input num" name="persistentRepeatMin" value="${s.persistentRepeatMin}"></label>${headsUpHTML(s)}
             </div>` : `<div class="row wrap">
               <label class="field">Sonido de alarma<select class="input" name="alarmSound">${Object.entries(SOUNDS).map(([k, l]) => `<option value="${k}" ${s.alarmSound === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
               <button class="btn self-end" data-act="play">▶ Escuchar</button>
               <label class="field">Volumen<input type="range" min="0" max="1" step="0.05" name="alarmVolume" value="${s.alarmVolume}"></label>
-              <label class="field">Repetir la persistente cada (min)<input type="number" min="1" max="60" class="input num" name="persistentRepeatMin" value="${s.persistentRepeatMin}"></label>
+              <label class="field">Repetir la persistente cada (min)<input type="number" min="1" max="60" class="input num" name="persistentRepeatMin" value="${s.persistentRepeatMin}"></label>${headsUpHTML(s)}
             </div>
             <details><summary>Patrones de vibración (ms vibrando, pausa, vibrando…)</summary>
               ${['vibrate', 'sound', 'alarm', 'persistent'].map((k) => `<label class="field">${LEVELS[k].icon} ${LEVELS[k].short}<input class="input" data-vib="${k}" value="${(s.vibration[k] ?? []).join(', ')}"></label>`).join('')}
@@ -368,7 +377,7 @@ export function openSettings() {
           }
           return;
         }
-        const num = ['weekStart', 'dayStart', 'dayEnd', 'scrollTo', 'hourHeight', 'defaultDuration', 'persistentRepeatMin', 'alarmVolume'];
+        const num = ['weekStart', 'dayStart', 'dayEnd', 'scrollTo', 'hourHeight', 'defaultDuration', 'persistentRepeatMin', 'alarmHeadsUp', 'alarmVolume'];
         if (!t.name || t.name.startsWith('hol')) return;
         let v = num.includes(t.name) ? +t.value : t.value;
         if (t.name === 'dayEnd') v = Math.max(v, (store.get().settings.dayStart ?? 0) + 1);

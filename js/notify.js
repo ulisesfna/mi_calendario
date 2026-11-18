@@ -30,6 +30,7 @@ export const SOUNDS = { clasica: 'Clásica', suave: 'Suave', digital: 'Digital',
 
 export function describeReminder(r) {
   if (r.insist) return `${LEVELS[r.level]?.icon ?? ''} 🔁 repetición (sin hacer)`;
+  if (r.pre) return `${LEVELS[r.level]?.icon ?? ''} aviso de la alarma (${r.pre} min antes)`;
   if (r.unit === 'abs') {
     const d = parseLocal(r.at);
     return `${LEVELS[r.level]?.icon ?? ''} ${d ? fmtDate(d) + ' ' + fmtTime(d) : '—'}`;
@@ -211,6 +212,14 @@ export function alarmText(inst, reminder, now = Date.now()) {
   const when = inst.allDay ? fmtDate(inst.start) : `${fmtDate(inst.start)} · ${fmtTime(inst.start)}`;
   const rel = fmtRelative(inst.start - now);
   const loc = inst.item.location ? ` · ${inst.item.location}` : '';
+  if (reminder.pre) {
+    // Aviso previo: «dentro de X min sonará la alarma de…»
+    const alarmAt = reminderAt(inst, reminder);
+    return {
+      title: `⏰ Alarma en ${reminder.pre} min: ${inst.icon ? inst.icon + ' ' : ''}${inst.title}`,
+      body: `Sonará a las ${fmtTime(new Date(alarmAt))} · ${when}${loc}`,
+    };
+  }
   const atEnd = !!UNITS[reminder.unit]?.end;
   const v = reminder.value | 0;
   const prefix = reminder.insist ? '🔁 Sigue sin hacer: ' : atEnd ? (v ? '⏳ Acaba pronto: ' : '🏁 Fin: ') : '';
@@ -374,14 +383,37 @@ function insistBetween(item, rems, t0, t1, out) {
   }
 }
 
+const isAlarm = (level) => level === 'alarm' || level === 'persistent';
+
 /** Avisos que tocan en el intervalo (t0, t1] */
 export function dueBetween(t0, t1) {
+  const out = dueRaw(t0, t1);
+  // Aviso previo de las alarmas: una notificación normal X min antes de que suene cada una
+  const pre = store.get().settings.alarmHeadsUp ?? 30;
+  if (pre > 0) {
+    const ms = pre * 60000;
+    for (const d of dueRaw(t0 + ms, t1 + ms, true)) {
+      const at = d.at - ms;
+      // Si ya hay otro aviso normal de lo mismo por esas fechas (±10 min), sobra
+      const near = out.some((o) => o.inst.id === d.inst.id && !isAlarm(o.r.level) && Math.abs(o.at - at) <= 10 * 60000);
+      if (near || at <= t0 || at > t1) continue;
+      out.push({ inst: d.inst, r: { ...d.r, id: `${d.r.id ?? d.r.value + d.r.unit}~pre`, level: 'sound', pre }, at });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/** Avisos del intervalo (t0, t1]; con `alarmsOnly`, solo las alarmas (sin repeticiones de tareas) */
+function dueRaw(t0, t1, alarmsOnly = false) {
   const out = [];
   for (const item of store.get().items) {
     if (!item.start) continue;
     if (!store.inAgenda(item) && !Array.isArray(item.reminders)) continue;
-    const rems = store.effectiveReminders(item);
-    if (item.type === 'task') insistBetween(item, rems, t0, t1, out);
+    let rems = store.effectiveReminders(item);
+    if (alarmsOnly) {
+      rems = rems.filter((r) => isAlarm(r.level));
+      if (!rems.length) continue;
+    } else if (item.type === 'task') insistBetween(item, rems, t0, t1, out);
     for (const r of rems) {
       if (r.unit === 'abs') {
         const at = parseLocal(r.at)?.getTime();
@@ -406,7 +438,7 @@ export function dueBetween(t0, t1) {
       }
     }
   }
-  return out.sort((a, b) => a.at - b.at);
+  return out;
 }
 
 export function tick() {
@@ -424,7 +456,8 @@ export function tick() {
     if (push.shownElsewhere(fk)) continue; // ya llegó con la app cerrada (aviso del servidor)
     const alarm = makeAlarm(d.inst, d.r);
     // Las repeticiones de tareas sin hacer que ya pasaron no se acumulan como perdidas (vendrá la siguiente)
-    if (now - d.at > 5 * 60000) d.r.insist || missed.push({ ...alarm, at: d.at });
+    // (ni los avisos previos de alarmas: ya habrá sonado la propia alarma)
+    if (now - d.at > 5 * 60000) d.r.insist || d.r.pre || missed.push({ ...alarm, at: d.at });
     else fire(alarm);
   }
   // Pospuestos

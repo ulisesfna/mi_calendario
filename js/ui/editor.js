@@ -223,9 +223,11 @@ export function openEditor(opts = {}) {
             </div>`;
           }
           if (r.freq === 'dates') {
+            // El selector se abre en la última fecha de la serie (no en hoy), que es donde se suele añadir la siguiente
+            const last = [dateKey(s), ...(r.dates ?? [])].sort().at(-1);
             det += `<div class="muted small">Además del ${fmtDate(s)}, se repite en:</div>
               <div class="tags">${(r.dates ?? []).map((k) => `<span class="tag">${fmtDate(parseLocal(k))} <button type="button" data-del-date="${k}">✕</button></span>`).join('')}</div>
-              <div class="row"><input type="date" class="input" name="addDate"><button type="button" class="btn small" data-act="add-date">Añadir fecha</button></div>`;
+              <div class="row"><input type="date" class="input" name="addDate" value="${last}"><button type="button" class="btn small" data-act="add-date">Añadir fecha</button></div>`;
           } else {
             const endMode = r.until ? 'until' : r.count ? 'count' : 'never';
             det += `<div class="row wrap center">Termina
@@ -250,12 +252,25 @@ export function openEditor(opts = {}) {
           det += `<div class="rec-preview"><b>${esc(describeRule(r, w.start))}</b><br><span class="muted small">Próximas: ${next.map((i) => fmtDate(i.start)).join(' · ') || '—'}</span></div>`;
         }
         return `<div class="rec">
+          ${followUI(r, s)}
           <label class="field">Repetir
             <select class="input" name="freq">
               ${[['none', 'No se repite'], ['daily', 'Cada día / cada N días'], ['weekly', 'Semanal (elige días)'], ['monthly', 'Mensual'], ['yearly', 'Anual'], ['dates', 'Fechas concretas']]
                 .map(([v, l]) => `<option value="${v}" ${freq === v ? 'selected' : ''}>${l}</option>`).join('')}
             </select></label>
           ${det}</div>`;
+      }
+
+      /**
+       * Plannings: repetir la sesión los días justo después (día siguiente, +2, +3…). Se combinan
+       * libremente y se guardan como «fechas concretas».
+       */
+      const FOLLOW = [[1, 'Día siguiente'], [2, '+2 días'], [3, '+3 días'], [4, '+4 días'], [5, '+5 días'], [7, '+1 semana'], [14, '+2 semanas']];
+      function followUI(r, s) {
+        if (w.type !== 'plan' || (r && r.freq !== 'dates')) return '';
+        const base = dateKey(s);
+        return `<div class="field">Repetir los días después</div>
+          <div class="chips">${FOLLOW.map(([n, l]) => `<button type="button" class="chipbtn ${r?.dates?.includes(keyAddDays(base, n)) ? 'on' : ''}" data-follow="${n}">${l}</button>`).join('')}</div>`;
       }
 
       /** Fila de un aviso: editable (sus datos están en w.reminders[i]) o solo para ver (heredado) */
@@ -421,6 +436,11 @@ export function openEditor(opts = {}) {
             const nd = parseLocal(t.value);
             nd.setHours(old.getHours(), old.getMinutes());
             setStart(nd);
+            // Plannings con días después: se mueven con la sesión (siguen siendo «el día siguiente», etc.)
+            if (w.type === 'plan' && w.recurrence?.freq === 'dates') {
+              const dd = diffDays(old, nd);
+              w.recurrence.dates = w.recurrence.dates.map((k) => keyAddDays(k, dd));
+            }
             if (w.recurrence?.freq === 'weekly' && w.recurrence.byDay.length === 1) w.recurrence.byDay = [nd.getDay()];
             break;
           }
@@ -633,6 +653,16 @@ export function openEditor(opts = {}) {
           w.priority = +prio.dataset.prio;
           return render();
         }
+        const fol = t.closest('[data-follow]');
+        if (fol) {
+          const k = keyAddDays(w.start.slice(0, 10), +fol.dataset.follow);
+          w.recurrence ??= defaultRule('dates', w.start);
+          const set = new Set(w.recurrence.dates ?? []);
+          set.has(k) ? set.delete(k) : set.add(k);
+          w.recurrence.dates = [...set].sort();
+          if (!set.size) w.recurrence = null; // sin días extra: no se repite
+          return render();
+        }
         if (t.closest('[data-del-date]')) {
           w.recurrence.dates = w.recurrence.dates.filter((k) => k !== t.closest('[data-del-date]').dataset.delDate);
           return render();
@@ -704,7 +734,9 @@ export function openEditor(opts = {}) {
           }
           case 'add-date': {
             const v = body.querySelector('[name=addDate]').value;
-            if (v) w.recurrence.dates = [...new Set([...(w.recurrence.dates ?? []), v])].sort();
+            if (!v) return;
+            if (v === w.start.slice(0, 10) || (w.recurrence.dates ?? []).includes(v)) return toast('Esa fecha ya está: elige otro día en el calendario');
+            w.recurrence.dates = [...(w.recurrence.dates ?? []), v].sort();
             return render();
           }
           case 'add-ex': {

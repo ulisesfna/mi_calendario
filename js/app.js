@@ -134,6 +134,12 @@ function range() {
   }
 }
 
+/** ¿El mes es más alto que la pantalla? Entonces el dedo también puede desplazarlo (ver wireSwipe) */
+function markMonthScroll() {
+  const view = $('#view');
+  view.querySelector('.month')?.classList.toggle('scrolls', view.scrollHeight > view.clientHeight + 4);
+}
+
 /** Eje en el que se desliza cada vista: el mes de arriba a abajo, el resto de lado */
 const swipeAxis = () => (ctx.view === 'month' ? 'y' : 'x');
 
@@ -150,6 +156,8 @@ function step(dir, { animate = true } = {}) {
   miniCursor = startOfMonth(ctx.cursor);
   closePopover();
   render();
+  // Mes que no cabe entero: el siguiente se ve desde arriba y el anterior desde abajo (por donde se llega)
+  if (ctx.view === 'month') $('#view').scrollTop = dir > 0 ? 0 : $('#view').scrollHeight;
   if (animate) {
     // El periodo nuevo entra por el lado hacia el que se avanza
     const el = $('#view').firstElementChild;
@@ -177,7 +185,10 @@ function render() {
   view.className = `view-${ctx.view}`;
   const r = range();
   if (r) renderTimeGrid(view, r);
-  else if (ctx.view === 'month') renderMonth(view);
+  else if (ctx.view === 'month') {
+    renderMonth(view);
+    markMonthScroll();
+  }
   else if (ctx.view === 'agenda') renderAgenda(view);
   else if (ctx.view === 'planning') renderPlanning(view);
 
@@ -244,11 +255,16 @@ function wireSwipe() {
   const view = $('#view');
   let s = null;
   const canSwipe = () => ['day', '3day', 'week', 'month', 'agenda'].includes(ctx.view) && !hasModal();
+  // Si el mes no cabe en la pantalla (móvil en horizontal, tablet, ventana baja), primero se desplaza
+  // para ver todas las semanas y solo al llegar arriba o abajo del todo se cambia de mes
+  const scrolls = () => view.scrollHeight > view.clientHeight + 4;
+  const atTop = () => view.scrollTop <= 1;
+  const atBottom = () => view.scrollTop + view.clientHeight >= view.scrollHeight - 2;
 
   view.addEventListener('touchstart', (e) => {
     s = null;
     if (e.touches.length !== 1 || !canSwipe() || e.target.closest('input, textarea, select')) return;
-    s = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), axis: null, d: 0, el: null };
+    s = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), axis: null, d: 0, el: null, top: atTop(), bottom: atBottom() };
   }, { passive: true });
 
   view.addEventListener('touchmove', (e) => {
@@ -259,6 +275,11 @@ function wireSwipe() {
       const axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
       if (axis !== swipeAxis()) {
         s = null; // es un desplazamiento normal (scroll)
+        return;
+      }
+      // Mes más alto que la pantalla: hacia arriba solo desde el final, hacia abajo solo desde el principio
+      if (axis === 'y' && !(dy < 0 ? s.bottom : s.top)) {
+        s = null;
         return;
       }
       s.axis = axis;
@@ -300,20 +321,34 @@ function wireSwipe() {
   view.addEventListener('touchcancel', end);
 
   // Ratón / panel táctil: rueda en el mes y deslizamiento horizontal en el resto
-  let acc = 0, lock = 0, resetT = null;
+  let acc = 0, lock = 0, resetT = null, lastWheel = 0, fromEdge = false;
   view.addEventListener('wheel', (e) => {
     if (!canSwipe() || e.ctrlKey) return;
     const axis = swipeAxis();
     const delta = axis === 'y' ? e.deltaY : e.deltaX;
     if (Math.abs(delta) <= Math.abs(axis === 'y' ? e.deltaX : e.deltaY)) return;
-    // En el mes solo si la propia vista no tiene nada que desplazar
-    if (axis === 'y' && view.scrollHeight > view.clientHeight + 4) return;
+    // Un gesto nuevo empieza tras una pausa de la rueda
+    const now = Date.now();
+    const fresh = now - lastWheel > 250;
+    lastWheel = now;
+    let need = axis === 'y' ? 60 : 90;
+    if (axis === 'y' && scrolls()) {
+      // Mes más alto que la ventana: la rueda desplaza hasta ver la última (o la primera) semana…
+      const edge = delta > 0 ? atBottom() : atTop();
+      if (fresh) fromEdge = edge;
+      if (!edge) return;
+      // … y cambia de mes con un gesto que empiece ya en el borde (no con la inercia del desplazamiento)
+      e.preventDefault();
+      if (!fromEdge) return;
+      need = 120;
+    }
     e.preventDefault();
     if (Date.now() < lock) return;
+    if (acc && Math.sign(acc) !== Math.sign(delta)) acc = 0;
     acc += delta;
     clearTimeout(resetT);
     resetT = setTimeout(() => (acc = 0), 250);
-    if (Math.abs(acc) > (axis === 'y' ? 60 : 90)) {
+    if (Math.abs(acc) > need) {
       step(acc > 0 ? 1 : -1);
       acc = 0;
       lock = Date.now() + 450;
@@ -696,7 +731,11 @@ function buildChrome() {
   let rt;
   window.addEventListener('resize', () => {
     clearTimeout(rt);
-    rt = setTimeout(() => ctx.view === 'month' && $('#view .month') && fitCells($('#view .month')), 120);
+    rt = setTimeout(() => {
+      if (ctx.view !== 'month' || !$('#view .month')) return;
+      fitCells($('#view .month'));
+      markMonthScroll();
+    }, 120);
   });
 }
 
